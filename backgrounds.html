@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ttydterm · terminal background studies</title>
+<style>
+  :root { color-scheme: dark; --sans: system-ui,-apple-system,"Segoe UI",sans-serif; --mono: ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; min-height:100%; }
+  body { font-family:var(--sans); background:var(--page-bg,#151820); color:var(--page-fg,#d8deec); }
+  button { font:inherit; color:inherit; }
+  header { position:sticky; top:0; z-index:20; display:flex; align-items:center; gap:18px; min-height:64px; padding:10px 18px; background:color-mix(in srgb,var(--header-bg,#1d212b) 94%,transparent); color:var(--page-fg); backdrop-filter:blur(16px); border-bottom:1px solid var(--page-edge,#ffffff22); }
+  h1 { margin:0; font:700 15px var(--mono); white-space:nowrap; }
+  .controls { display:flex; flex-wrap:wrap; align-items:center; gap:14px; }
+  .control { display:flex; align-items:center; gap:7px; color:var(--page-muted,#aeb7ca); font-size:12px; }
+  .swatches { display:flex; gap:5px; }
+  .swatch { width:29px; height:24px; border:0; border-radius:5px; background:var(--c); box-shadow:inset 0 0 0 1px #ffffff35; cursor:pointer; }
+  .swatch[aria-checked="true"] { outline:2px solid #8fb4ff; outline-offset:2px; }
+  input[type=range] { width:110px; accent-color:#79a5ff; }
+  main { padding:18px; display:grid; gap:22px; }
+  .study { display:grid; gap:9px; }
+  .study-head { display:flex; gap:12px; align-items:baseline; }
+  .study h2 { margin:0; font-size:14px; }
+  .study p { margin:0; color:var(--page-muted,#8e99ae); font-size:11.5px; }
+  .workspace { display:grid; grid-template-columns:190px minmax(0,1fr); gap:8px; }
+  .sidebar { min-height:412px; display:flex; flex-direction:column; overflow:hidden; border-radius:8px; color:var(--side-fg); background-color:var(--side-base); background-image:var(--side-bg); box-shadow:var(--side-shadow); font:12px var(--mono); }
+  .side-head { display:flex; align-items:center; gap:9px; height:44px; padding:0 12px; font-weight:700; }
+  .side-head b { flex:1; }
+  .side-list { display:grid; gap:3px; padding:7px; }
+  .side-row { display:flex; align-items:center; gap:9px; height:34px; padding:0 9px; border-radius:6px; color:var(--side-dim); }
+  .side-row.active { color:var(--side-fg); background:var(--side-active); box-shadow:inset 3px 0 var(--side-focus); }
+  .side-row i { width:13px; height:13px; border:1px solid currentColor; border-radius:3px; opacity:.8; }
+  .side-foot { margin-top:auto; display:flex; justify-content:center; gap:7px; padding:10px; }
+  .side-foot span { width:27px; height:25px; border-radius:5px; background:var(--side-button); }
+  .deck { display:grid; grid-template-columns:repeat(3,minmax(230px,1fr)); gap:8px; }
+  .term { position:relative; min-height:202px; overflow:hidden; border-radius:8px; background-color:var(--base); background-image:var(--background); color:var(--fg); font:12px/1.5 var(--mono); cursor:pointer; isolation:isolate; box-shadow:var(--inactive-shadow,none); }
+  .term::after { content:""; position:absolute; inset:0; z-index:0; background:var(--veil); pointer-events:none; }
+  .term.active { box-shadow:inset 0 0 0 3px var(--focus),0 10px 28px var(--active-shadow); }
+  .term-body { position:relative; z-index:1; padding:11px 13px; }
+  .prompt { color:var(--green); }.path { color:var(--blue); }.dim { color:var(--dim); }.red { color:var(--red); }.cyan { color:var(--cyan); }.yellow { color:var(--yellow); }
+  .files { display:grid; grid-template-columns:repeat(4,1fr); gap:1px 14px; margin:2px 0; }
+  .badge { position:absolute; right:9px; bottom:8px; z-index:2; padding:2px 6px; border-radius:4px; color:var(--dim); background:color-mix(in srgb,var(--base) 82%,transparent); font:10px var(--mono); }
+  .hint { text-align:center; color:var(--page-muted,#7e899d); font-size:11px; padding:0 0 18px; }
+  @media(max-width:1050px){ .deck{grid-template-columns:repeat(2,minmax(230px,1fr));} }
+  @media(max-width:760px){ .workspace{grid-template-columns:1fr}.sidebar{min-height:190px}.deck{grid-template-columns:1fr;} header{align-items:flex-start;flex-direction:column;} }
+</style>
+</head>
+<body>
+<header>
+  <h1>ttydterm / background studies</h1>
+  <div class="controls">
+    <div class="control"><span>base theme</span><div class="swatches" id="themes"></div></div>
+    <label class="control"><span>inactive colour</span><input id="strength" type="range" min="2" max="16" value="4"><output id="strengthOut">4%</output></label>
+    <label class="control"><span>active boost</span><input id="boost" type="range" min="1" max="3" step=".1" value="2"><output id="boostOut">2.0×</output></label>
+    <label class="control"><input id="shadows" type="checkbox"><span>pane shadows</span></label>
+    <label class="control"><input id="matchSidebar" type="checkbox"><span>match sidebar to pane</span></label>
+  </div>
+</header>
+<main id="app"></main>
+<div class="hint">Click any terminal to make it active. Pane identity is deterministic from its zero-based grid index.</div>
+<script>
+const THEMES={
+  night:{appearance:'dark',bg:'#11141c',fg:'#c8d1e4',dim:'#7682a1',green:'#9ece6a',blue:'#7aa2f7',red:'#f7768e',cyan:'#7dcfff',yellow:'#e0af68',focus:'#7aa2f7',ui:{canvas:'#272a31',sidebar:'#45474d',raised:'#2c2f36',edge:'#7b7e85',text:'#f4f6fb',muted:'#d1d5df'}},
+  ink:{appearance:'dark',bg:'#0d0d0f',fg:'#d0d0d2',dim:'#7d7d83',green:'#8cc265',blue:'#61a6f2',red:'#e05561',cyan:'#56b6c2',yellow:'#d4b062',focus:'#78b7ff',ui:{canvas:'#252527',sidebar:'#424244',raised:'#29292b',edge:'#77777a',text:'#f5f5f6',muted:'#d0d0d4'}},
+  ocean:{appearance:'dark',bg:'#0e1a2b',fg:'#c3d4e8',dim:'#7087a2',green:'#7fd1a4',blue:'#5eb0ef',red:'#ef7d84',cyan:'#4fc3f7',yellow:'#e5c07b',focus:'#64c7ff',ui:{canvas:'#253243',sidebar:'#405062',raised:'#293849',edge:'#75879a',text:'#edf5ff',muted:'#c5d2e2'}},
+  forest:{appearance:'dark',bg:'#101a13',fg:'#c6d6c4',dim:'#718a73',green:'#8fd97a',blue:'#79b8c4',red:'#e08a7a',cyan:'#79c4bb',yellow:'#d9c471',focus:'#9cecff',ui:{canvas:'#263128',sidebar:'#435047',raised:'#2a372d',edge:'#78897c',text:'#eff8ee',muted:'#c9d7c9'}},
+  amber:{appearance:'dark',bg:'#1a1510',fg:'#e0d3bd',dim:'#937f62',green:'#b9c46b',blue:'#94b3c9',red:'#e88b6a',cyan:'#8ec4bd',yellow:'#f0b429',focus:'#ffd166',ui:{canvas:'#332d25',sidebar:'#514a40',raised:'#393229',edge:'#908477',text:'#fff5e6',muted:'#ded1bc'}},
+  paper:{appearance:'light',bg:'#fbfaf6',fg:'#2c3038',dim:'#6c7079',green:'#4a7a32',blue:'#2a5db0',red:'#b3405a',cyan:'#1c7480',yellow:'#96690b',focus:'#174fa7',ui:{canvas:'#e1e0dc',sidebar:'#d2d1cd',raised:'#f1f0ec',edge:'#74777d',text:'#20242b',muted:'#545963'}},
+  daylight:{appearance:'light',bg:'#f7f8fa',fg:'#20242c',dim:'#626873',green:'#3c7429',blue:'#245aa8',red:'#ad314b',cyan:'#166d78',yellow:'#875e00',focus:'#174f9e',ui:{canvas:'#dde0e5',sidebar:'#cdd2d9',raised:'#eef0f3',edge:'#6c737d',text:'#171b22',muted:'#4d5560'}},
+  mist:{appearance:'light',bg:'#eef3f7',fg:'#202a35',dim:'#5d6875',green:'#356f37',blue:'#20599f',red:'#a83650',cyan:'#146b75',yellow:'#805b00',focus:'#145296',ui:{canvas:'#d4dce3',sidebar:'#c3ced8',raised:'#e4ebf0',edge:'#65717d',text:'#17212b',muted:'#465462'}},
+  sand:{appearance:'light',bg:'#f4efe3',fg:'#302c25',dim:'#696158',green:'#467126',blue:'#315a9b',red:'#aa394c',cyan:'#1c6b70',yellow:'#805900',focus:'#274f91',ui:{canvas:'#ddd6c8',sidebar:'#cec4b3',raised:'#ebe4d7',edge:'#746b60',text:'#262119',muted:'#574f45'}}
+};
+const STUDIES=[
+ {id:'aurora',name:'A · Corner aurora / Tinted slab',note:'Quiet terminal fields; sidebar is a solid, more active tint of the theme.', stops:[[330,8,38],[205,8,42],[278,7,40],[42,5,44]]},
+ {id:'ribbons',name:'B · Diagonal ribbons / Chromatic wash',note:'Pane ribbons paired with a restrained two-color sidebar wash.', stops:[[345,7,44],[32,6,42],[195,7,44],[260,5,46]]},
+ {id:'horizon',name:'C · Soft horizon / Luminous rail',note:'Atmospheric panes; sidebar stays mostly solid with one colored edge light.', stops:[[215,7,42],[165,5,44],[28,6,42],[300,4,48]]},
+ {id:'prism',name:'D · Offset prism / Gradient glass',note:'Most colorful panes and the strongest multi-gradient sidebar treatment.', stops:[[350,9,38],[190,9,42],[52,8,40],[270,8,42]]}
+];
+let theme='night', strength=4, boost=2, shadows=false, matchSidebar=false, active={study:'aurora',index:0};
+const app=document.querySelector('#app');
+function hsl(h,s,l,a){return `hsla(${((h%360)+360)%360} ${s}% ${l}% / ${a})`}
+function seeded(index,salt){ let x=(index+1)*2654435761+salt*1013904223; x^=x>>>16; return x>>>0; }
+function background(study,index,isActive){
+  const amount=(strength*(isActive?boost:1))/100;
+  const seed=seeded(index,STUDIES.indexOf(study)+1);
+  const rot=seed%360, flip=(seed>>>5)&1;
+  if(study.id==='aurora') return [
+    `linear-gradient(${25+(seed%50)}deg,${hsl(rot+study.stops[0][0],78,52,amount)} 0%,transparent 48%)`,
+    `linear-gradient(${210+(seed%35)}deg,${hsl(rot+study.stops[1][0],72,50,amount*.9)} 0%,transparent 52%)`,
+    `linear-gradient(${110+(seed%45)}deg,transparent 45%,${hsl(rot+study.stops[2][0],70,53,amount*.72)} 100%)`,
+    `linear-gradient(${flip?90:270}deg,transparent 64%,${hsl(rot+study.stops[3][0],75,54,amount*.5)} 100%)`
+  ].join(',');
+  if(study.id==='ribbons') return [0,1,2,3].map((n)=>{
+    const angle=110+((seed>>>n*3)%30); const at=12+n*25+((seed>>>n*4)%9);
+    return `linear-gradient(${angle}deg,transparent ${at-18}%,${hsl(rot+study.stops[n][0],74,52,amount*(1-n*.08))} ${at}%,transparent ${at+22}%)`;
+  }).join(',');
+  if(study.id==='horizon') return [
+    `linear-gradient(${175+(seed%12)}deg,${hsl(rot+215,72,52,amount*.8)} 0%,transparent 42%)`,
+    `linear-gradient(${5+(seed%15)}deg,transparent 52%,${hsl(rot+165,68,51,amount*.72)} 100%)`,
+    `linear-gradient(90deg,${hsl(rot+28,75,53,amount*.55)} 0%,transparent 35%)`,
+    `linear-gradient(270deg,${hsl(rot+300,70,53,amount*.45)} 0%,transparent 30%)`
+  ].join(',');
+  return [0,1,2,3].map((n)=>{
+    const angle=[32,148,218,305][n]+(seed%18); const p=[18,35,58,76][(n+(seed%3))%4];
+    return `linear-gradient(${angle}deg,transparent ${Math.max(0,p-28)}%,${hsl(rot+study.stops[n][0],78,52,amount*(1-n*.06))} ${p}%,transparent ${Math.min(100,p+30)}%)`;
+  }).join(',');
+}
+function depth(study,index){
+  const light=THEMES[theme].appearance==='light';
+  const seed=seeded(index,STUDIES.indexOf(study)+1), hue=(seed%360+215)%360;
+  if(!shadows) return {inactive:'none',active:'transparent'};
+  const ambient=[.08,.11,.07,.13][STUDIES.indexOf(study)];
+  return light
+    ? {inactive:`inset 0 0 0 1px hsla(${hue} 38% 30% / .15),0 7px 18px hsla(${hue} 36% 24% / ${.15+ambient})`,active:`hsla(${hue} 42% 24% / .25)`}
+    : {inactive:`inset 0 0 0 1px hsla(${hue} 62% 72% / .13),0 8px 22px hsla(${hue} 70% 8% / ${.40+ambient}),0 0 13px hsla(${hue} 70% 52% / ${ambient})`,active:`hsla(${hue} 70% 8% / .68)`};
+}
+function sidebar(study){
+ const t=THEMES[theme], light=t.appearance==='light', n=STUDIES.indexOf(study), hue=(215+n*47)%360;
+ /* Use the same explicitly audited UI text/sidebar tokens as the real app.
+    Decorative gradients stay low-alpha so they cannot become the surface that
+    text contrast depends on. Matching uses terminal colors only when their
+    audited terminal foreground and dim tokens are also selected. */
+ const ink=matchSidebar?t.fg:t.ui.text, dim=matchSidebar?t.dim:t.ui.muted;
+ const base=matchSidebar?t.bg:t.ui.sidebar;
+ let bg=matchSidebar?background(study,0,false):'none';
+ if(!matchSidebar&&study.id==='ribbons') bg=`linear-gradient(145deg,${hsl(hue+180,65,52,light?.10:.17)},transparent 54%),linear-gradient(330deg,${hsl(hue+300,68,54,light?.08:.13)},transparent 60%)`;
+ if(!matchSidebar&&study.id==='horizon') bg=`linear-gradient(90deg,${hsl(hue+190,70,55,light?.14:.24)} 0 4px,transparent 4px),linear-gradient(180deg,${hsl(hue+30,62,54,light?.06:.10)},transparent 45%)`;
+ if(!matchSidebar&&study.id==='prism') bg=`linear-gradient(30deg,${hsl(hue+10,70,54,light?.10:.18)},transparent 52%),linear-gradient(150deg,${hsl(hue+145,68,52,light?.08:.15)},transparent 58%),linear-gradient(280deg,${hsl(hue+270,70,55,light?.08:.13)},transparent 62%)`;
+ return `--side-base:${base};--side-bg:${bg};--side-fg:${ink};--side-dim:${dim};--side-active:color-mix(in srgb,${base} 76%,${t.focus} 24%);--side-focus:${t.focus};--side-button:color-mix(in srgb,${base} 82%,${ink} 18%);--side-shadow:${light?'0 10px 26px rgba(25,35,48,.22)':'0 12px 30px rgba(0,0,0,.52),0 0 18px '+hsl(hue,65,50,.06)}`;
+}
+function side(study){return `<aside class="sidebar" style="${sidebar(study)}"><div class="side-head"><span>▣</span><b>ttydterm</b><span>◫</span></div><div class="side-list"><div class="side-row active"><i></i>kalviumjr</div><div class="side-row"><i></i>infra</div><div class="side-row"><i></i>notes</div><div class="side-row"><i></i>playground</div></div><div class="side-foot"><span></span><span></span></div></aside>`} 
+function term(study,index){
+ const t=THEMES[theme], on=active.study===study.id&&active.index===index, d=depth(study,index);
+ return `<div class="term${on?' active':''}" data-study="${study.id}" data-index="${index}" style="--base:${t.bg};--fg:${t.fg};--dim:${t.dim};--green:${t.green};--blue:${t.blue};--red:${t.red};--cyan:${t.cyan};--yellow:${t.yellow};--focus:${t.focus};--background:${background(study,index,on)};--veil:${on?'transparent':`color-mix(in srgb,${t.bg} 18%,transparent)`};--inactive-shadow:${d.inactive};--active-shadow:${d.active}">
+ <div class="term-body"><span class="prompt">anil@fedora</span><span class="dim">:</span><span class="path">~/work/project</span><span class="dim">$ </span>ls
+ <div class="files"><span class="blue">src</span><span class="blue">docs</span><span class="green">build.sh</span><span>README.md</span><span class="cyan">current</span><span class="red">archive.tar.gz</span><span>package.json</span><span class="yellow">deploy.sh</span></div>
+ <span class="prompt">anil@fedora</span><span class="dim">:</span><span class="path">~/work/project</span><span class="dim">$ </span>${['pi','npm run dev','git status','journalctl -f','bash','htop'][index]}
+ <div><span class="dim">◆ session ready · pane-${index+1}</span></div><div class="cyan">  http://localhost:${5173+index}/</div></div><span class="badge">#${index}</span></div>`;
+}
+function render(){
+ const t=THEMES[theme]; document.documentElement.style.colorScheme=t.appearance;
+ const root=document.documentElement.style;
+ root.setProperty('--page-bg',t.ui.canvas); root.setProperty('--header-bg',t.ui.raised);
+ root.setProperty('--page-fg',t.ui.text); root.setProperty('--page-muted',t.ui.muted); root.setProperty('--page-edge',t.ui.edge);
+ document.body.style.background=t.ui.canvas; document.body.style.color=t.ui.text;
+ document.querySelector('#themes').innerHTML=Object.entries(THEMES).map(([k,v])=>`<button class="swatch" style="--c:${v.bg}" role="radio" aria-label="${k}" aria-checked="${k===theme}" data-theme="${k}"></button>`).join('');
+ app.innerHTML=STUDIES.map(s=>`<section class="study"><div class="study-head"><h2>${s.name}</h2><p>${s.note}</p></div><div class="workspace">${side(s)}<div class="deck">${[0,1,2,3,4,5].map(i=>term(s,i)).join('')}</div></div></section>`).join('');
+ document.querySelectorAll('.term').forEach(el=>el.onclick=()=>{active={study:el.dataset.study,index:+el.dataset.index};render()});
+ document.querySelectorAll('.swatch').forEach(el=>el.onclick=()=>{theme=el.dataset.theme;render()});
+}
+document.querySelector('#strength').oninput=e=>{strength=+e.target.value;document.querySelector('#strengthOut').value=strength+'%';render()};
+document.querySelector('#boost').oninput=e=>{boost=+e.target.value;document.querySelector('#boostOut').value=boost.toFixed(1)+'×';render()};
+document.querySelector('#shadows').onchange=e=>{shadows=e.target.checked;render()};
+document.querySelector('#matchSidebar').onchange=e=>{matchSidebar=e.target.checked;render()};
+render();
+</script>
+</body>
+</html>

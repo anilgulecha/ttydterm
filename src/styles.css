@@ -1,0 +1,749 @@
+  :root {
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+    /* Boot fallbacks only. Once App mounts, chromeVars replaces every token
+       below from the active folder theme. Components consume semantic roles;
+       hardcoded colors live only in the theme table. */
+    --ui-panel:  #f7f8fb;   /* rail surface                                   */
+    --ui-raised: #ffffff;   /* dialogs                                        */
+    --ui-field:  #fbfcfe;   /* inputs                                         */
+    --ui-ink:    #1b2230;   /* primary text        — 15.00 on panel           */
+    --ui-muted:  #5b6577;   /* secondary text/icon —  5.53 on panel           */
+    --ui-edge:   #d5dbe6;   /* hairline                                       */
+    --ui-hover:  #e9edf4;
+    --ui-active: #e3e9fb;   /* selected row                                   */
+    --ui-accent: #2f57d4;   /* marker + focus ring —  5.76 on panel           */
+    --ui-danger: #b3261e;   /*                     —  6.54 on white           */
+    --ui-warn:   #8a4b00;
+    --ui-success:#356b2d;
+    --ui-selected-ink:#ffffff;
+    --ui-shadow: rgba(0,0,0,.42);
+    --ui-scrim: rgba(0,0,0,.55);
+
+    /* dialog aliases (same system palette, raised surface) */
+    --panel: var(--ui-raised);
+    --line: var(--ui-edge);
+    --ink: var(--ui-ink);
+    --muted: var(--ui-muted);
+    --accent: var(--ui-accent);
+    --danger: var(--ui-danger);
+
+    --radius: 10px;
+
+    /* THE spacing token. Every primary gutter in the app is this one number:
+       the page's outer margin, the sidebar-to-stage gap, and the gap between
+       any two panes. They used to disagree — the shell had `padding: 8px` AND
+       `gap: 8px`, and the rail resizer sat between them with `margin: 0 -4px`,
+       so the sidebar-to-stage channel measured 16px against 8px between panes
+       and the rail read as detached from the workspace it belongs to. The
+       resizer is now a real 8px spacer and .shell has no gap of its own, so a
+       single value produces every channel on screen. test.mjs measures them
+       off the rendered boxes and fails if any two differ.
+
+       It is also read by the layout maths (GAP, below) via getComputedStyle,
+       so the divider thickness the tree reserves cannot drift from the gutter
+       the stylesheet paints. */
+    --gap: 8px;
+    --rail-icon-col: 52px;  /* the sidebar's FIXED icon column (see .rail) */
+    color-scheme: light;
+  }
+
+  * { box-sizing: border-box; }
+  html, body, #root { height: 100%; }
+  body {
+    margin: 0;
+    font-family: var(--sans);
+    /* --boot-bg is written by the inline boot script below from the last active
+       theme, so a refresh never flashes white before React paints. */
+    background: var(--boot-bg, #eef1f6);
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+  button { font: inherit; color: inherit; cursor: pointer; background: none; border: 0; padding: 0; }
+  input, select, textarea { font: inherit; color: inherit; }
+
+  /* =========================================================================
+     SHELL — the gaps behind the panes still follow the active workspace theme
+     (so a dark workspace does not sit in a bright frame), but the SIDEBAR is
+     its own system surface and does not change with it.
+
+     No `gap` here: the rail gutter IS an element (it has to be, it is the
+     resize handle), so a flex gap on top of it would stack two channels into
+     one and make the sidebar sit twice as far from the stage as two panes sit
+     from each other. Padding supplies the outer margin, the gutter supplies
+     the sidebar channel, and a divider supplies the pane channel — all three
+     are --gap.
+     ========================================================================= */
+  .shell {
+    display: flex;
+    height: 100%;
+    padding: var(--gap);
+    gap: 0;
+    background: var(--stage-bg);
+  }
+
+  /* ---------- sidebar : the only text on screen ----------
+     ONE element in both states. Collapsing animates its WIDTH only; the icon
+     column is a fixed 52px track that never moves, so every badge and every
+     footer control keeps its exact x/y whether the rail is open or shut.
+     (Two separate elements — .rail + .rail-stub — is what made the icons jump:
+     a row of five buttons became a column of two, and every glyph moved.)
+
+     No perimeter border and no internal hairlines. The rail is a light panel
+     on a stage tinted from the terminal theme, so the colour step already
+     draws its shape; a 1px line on top of that is a second edge saying the
+     same thing. Head and footer are likewise separated by position and
+     spacing, not by rules. (The one thing this must not do is VANISH: the
+     rail/stage step is measured in test.mjs against a floor, including under
+     the light `paper` theme where both surfaces are pale.) */
+  .rail {
+    flex: 0 0 auto;
+    font-family: var(--mono);
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    border-radius: var(--radius);
+    background-color: var(--ui-panel);
+    background-image: var(--ui-panel-atmosphere);
+    color: var(--ui-ink);
+    overflow: hidden;
+  }
+
+  /* Brand head. The mark sits in the SAME fixed 52px track as every workspace
+     badge below it, so it is the one fixed point the rail is built around. The
+     wordmark and the collapse toggle occupy the label column, which is the only
+     thing collapsing removes. */
+  .rail-head {
+    flex: 0 0 auto;
+    display: flex; align-items: center;
+    height: 44px; padding: 0;
+  }
+  .brand-mark {
+    flex: 0 0 var(--rail-icon-col);
+    display: inline-flex; align-items: center; justify-content: center;
+    height: 100%; color: var(--ui-accent);
+  }
+  .brand-mark svg { width: 17px; height: 17px; }
+  .brand-name {
+    flex: 1; min-width: 0;padding-left:18px;
+    font-size: 16px; font-weight: 800; letter-spacing: .015em; color: var(--ui-ink);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .rail-toggle {
+    flex: 0 0 auto;
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 30px; height: 30px; margin-right: 7px;
+    border-radius: 6px; color: var(--ui-muted);
+    transition: background .12s, color .12s;
+  }
+  .rail-toggle svg { width: 16px; height: 16px; }
+  .rail-toggle:hover { background: var(--ui-hover); color: var(--ui-ink); }
+  .rail-toggle:focus-visible { outline: 2px solid var(--ui-accent); outline-offset: 1px; }
+  /* Collapsed: the label column is gone, so the toggle takes the icon track and
+     the mark steps aside — they cannot both own the same 52px. Nothing BELOW
+     the head moves, which is the property that matters. */
+  .rail.collapsed .brand-name { display: none; }
+  .rail.collapsed .brand-mark { display: none; }
+  .rail.collapsed .rail-toggle { flex: 0 0 var(--rail-icon-col); width: var(--rail-icon-col); margin-right: 0; border-radius: 0; }
+
+  .rail-list {
+    flex: 1; min-height: 0;
+    overflow-y: auto; overflow-x: hidden;
+    padding: 8px 0;
+    display: flex; flex-direction: column; gap: 2px;
+  }
+
+  .folder {
+    position: relative;
+    display: flex; align-items: center;
+    width: 100%; height: 36px;
+    padding: 0; margin: 0;
+    border-radius: 0;
+    font-size: 13px;
+    line-height: 1.3;
+    color: var(--ui-muted);
+    text-align: left;
+    cursor: pointer;
+    /* NO transition. Selecting a workspace has to look instantaneous, and a
+       120ms cross-fade on the row is read as the SWITCH being slow even when
+       the surface behind it swapped in a single frame — the eye blames the
+       slowest thing that moved, not the fastest. */
+    transition: none;
+  }
+  .folder:hover { background: var(--ui-hover); color: var(--ui-ink); }
+  .folder.active { background: var(--ui-active); color: var(--ui-active-ink); font-weight: 600; }
+  .folder.active::before {
+    content: ""; position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+    width: 3px; height: 18px; border-radius: 0 2px 2px 0; background: var(--ui-accent);
+  }
+  .folder:focus-visible { outline: 2px solid var(--ui-accent); outline-offset: -2px; }
+
+  /* THE fixed track. Badge, gear and close all live in columns of a known
+     width, so nothing reflows when the label column appears or disappears. */
+  .folder-badge {
+    flex: 0 0 var(--rail-icon-col);
+    display: inline-flex; align-items: center; justify-content: center;
+    height: 100%;
+    font-size: 11px; font-weight: 650; letter-spacing: .02em; text-transform: uppercase;
+    color: inherit;
+  }
+  .folder-badge svg { width: 16px; height: 16px; }
+  .folder-name { flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+  .folder-shortcut { flex:0 0 42px;text-align:right;font:10px var(--mono);opacity:0;color:inherit;transition:opacity .12s; }
+  .folder:hover .folder-shortcut,.folder:focus-within .folder-shortcut { opacity:.72; }
+
+  /* Per-row actions. They RESERVE their space permanently and only fade in, so
+     the row's geometry — and the name's box — is identical hovered or not. */
+  .folder-actions {
+    flex: 0 0 30px; display: flex; align-items: center; gap: 1px;position:relative;
+    padding-right: 5px; margin-left: 4px;
+  }
+  .folder-act {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 24px; height: 24px; border-radius: 5px; color: inherit;
+    opacity: 0; transition: opacity .12s, background .12s, color .12s;
+  }
+  .folder-act svg { width: 13px; height: 13px; }
+  .folder:hover .folder-act, .folder:focus-within .folder-act { opacity: .78; }
+  .folder-act:hover { opacity: 1; background: var(--ui-hover); color: var(--ui-ink); }
+  .folder-act:focus-visible { opacity: 1; outline: 2px solid var(--ui-accent); outline-offset: 1px; }
+  .folder-act.danger:hover { background: var(--ui-hover); color: var(--ui-danger); }
+  .folder-menu { position:absolute;z-index:18;right:5px;top:30px;display:grid;min-width:126px;padding:4px;border-radius:7px;background:var(--ui-raised);color:var(--ui-ink);box-shadow:0 10px 28px var(--ui-shadow),inset 0 0 0 1px var(--ui-edge); }
+  .folder-menu button { display:flex;align-items:center;gap:8px;padding:7px 8px;border-radius:5px;text-align:left;font-size:12px; }
+  .folder-menu button:hover { background:var(--ui-hover); }
+  .folder-menu button.danger { color:var(--ui-danger); }
+  .folder-menu svg { width:14px;height:14px; }
+  /* collapsed: the label + actions columns are gone, nothing is hoverable */
+  .rail.collapsed .folder-name, .rail.collapsed .folder-actions { display: none; }
+  .rail.collapsed .folder { border-radius: 0; }
+
+  /* Search + backup, one row, at the foot. They are whole-app actions rather
+     than list items, which is why they are not in the list — and why they are
+     the two things a collapsed rail drops: at 52px a row cannot hold them
+     without stacking into a column, and stacking is what used to move every
+     glyph on screen when the rail closed. Hiding is honest; both are reachable
+     from the keyboard (⌘/Ctrl+K) with the rail shut. */
+  .rail-foot {
+    flex: 0 0 auto;
+    display: flex; flex-direction: row; align-items: center;
+    gap: 2px; padding: 6px 0 8px;
+  }
+  .rail.collapsed .rail-foot { display: none; }
+  .rail-list > .ico.add { align-self: center; width: 34px; border-radius: 7px; }
+  .rail-list > .ico.add:hover { background: var(--ui-hover); color: var(--ui-ink); }
+  .rail-foot { justify-content: center; }
+  .rail-foot .ico { width: 36px; border-radius: 7px; }
+
+  /* pictogram button. Width is the SAME fixed track as a folder badge, so a
+     rail control sits at identical coordinates in both rail states. */
+  .ico {
+    flex: 0 0 auto;
+    display: inline-flex; align-items: center; justify-content: center;
+    width: var(--rail-icon-col); height: 32px;
+    border-radius: 0 7px 7px 0; color: var(--ui-muted);
+    transition: background .12s, color .12s;
+  }
+  /* the add row: last item of the workspace list, on the same 52px track and
+     the same 36px row height as the folders above it, so it reads as the next
+     line of that list rather than as a floating button near it */
+  .ico.add { height: 36px; margin-top: 2px; }
+  .ico:hover { background: var(--ui-hover); color: var(--ui-ink); }
+  .ico:focus-visible { outline: 2px solid var(--ui-accent); outline-offset: -2px; }
+  .ico svg { width: 16px; height: 16px; }
+
+  /* The sidebar-to-stage channel. It is exactly --gap wide and it is the only
+     thing between the two — same grammar, same width and same hit area as a
+     pane divider, so the two gutters are indistinguishable by eye and by
+     ruler. It used to be `margin: 0 -4px` on top of the shell's own flex gap,
+     which collapsed its box to nothing and left a 16px channel: the resizer
+     was invisible AND the sidebar looked detached. */
+  .rail-gutter { flex: 0 0 var(--gap); position: relative; z-index: 5; }
+  .rail-gutter.resizable { cursor: col-resize; }
+  .rail-gutter::after {
+    content: ""; position: absolute; top: 8px; bottom: 8px; left: 3px; width: 2px;
+    border-radius: 2px; background: transparent; transition: background .13s;
+  }
+  .rail-gutter.resizable:hover::after, .rail-gutter.dragging::after { background: var(--ui-accent); }
+  .rail-gutter:focus-visible { outline: none; }
+  .rail-gutter:focus-visible::after { background: var(--ui-accent); box-shadow: 0 0 0 2px color-mix(in srgb,var(--ui-accent) 45%,transparent); }
+
+  /* ---------- workspace ----------
+     Every folder is mounted; the active one is RAISED. How the others are
+     hidden is the whole of "switching is instant":
+
+       display:none  — wrong. Restoring a display property restarts every CSS
+                       animation in the subtree, so each switch replayed the
+                       panes' entrance animation and read as the workspace
+                       booting again. It also drops the box, so the surface
+                       re-measures and the ResizeObserver fires on show.
+       visibility    — right. The subtree keeps its box and its layout, is not
+                       painted, is not hit-tested, and is out of the tab order.
+                       Flipping it starts nothing and measures nothing.
+
+     `hidden` stays on the element for its ARIA meaning; its default
+     `display:none` is overridden here deliberately. */
+  .stage { position: relative; flex: 1; min-width: 0; }
+  .surface { position: absolute; inset: 0; z-index: 1; }
+  .surface[hidden] {
+    display: block;
+    visibility: hidden;
+    z-index: 0;
+    pointer-events: none;
+  }
+  .viewport { position: absolute; inset: 0; overflow: auto; }
+  .canvas { position: relative; }
+
+  .split { display: flex; position: absolute; inset: 0; }
+  .split.columns { flex-direction: row; }
+  .split.rows { flex-direction: column; }
+  .slot { position: relative; flex: 0 0 auto; min-width: 0; min-height: 0; }
+
+  /* A pane gutter. Its WIDTH is the spacing token, so the channel a user grabs
+     and the channel a user sees are the same 8px — and the same 8px as the
+     page margin and the sidebar channel. The 2px indicator inside it is a
+     hover/focus affordance painted over that channel, never an addition to
+     it. */
+  .divider { flex: 0 0 auto; position: relative; z-index: 3; }
+  .columns > .divider { width: var(--gap); cursor: col-resize; }
+  .rows > .divider { height: var(--gap); cursor: row-resize; }
+  .divider::after {
+    content: ""; position: absolute;
+    background: color-mix(in srgb,var(--stage-accent) 72%,var(--stage-bg));
+    border-radius: 2px; opacity:0;
+    transition: opacity 200ms ease;
+  }
+  .columns > .divider::after { top: var(--radius); bottom: var(--radius); left: 3px; width: 2px; }
+  .rows > .divider::after { left: var(--radius); right: var(--radius); top: 3px; height: 2px; }
+  .divider:hover::after, .divider.dragging::after { opacity:1; }
+  .divider:focus-visible { outline: none; }
+  .divider:focus-visible::after { opacity:1;box-shadow: 0 0 0 2px color-mix(in srgb, var(--stage-accent) 45%, transparent); }
+  @media(prefers-reduced-motion:reduce){.divider::after{transition:none}}
+
+  /* ---------- pane ----------
+     The pane is a POSITIONING box only. Its FOCUSED border is drawn by
+     `.pane-edge`, an overlay sibling of the terminal, for two reasons:
+       • an outer box-shadow was clipped by the slot/canvas/viewport chain, so
+         a focused pane at the canvas edge showed a ring on two sides only;
+       • an INSET shadow on .pane is painted under .term's own background, so
+         it vanished entirely.
+     An overlay above the terminal is the only one of the three that is
+     continuous on all four sides in every position.
+
+     AT REST THERE IS NO BORDER. A terminal already owns a filled rectangle in
+     its own theme colour; the stage behind it is that same colour shifted, so
+     the boundary is drawn by the two surfaces meeting across the gutter. A
+     hairline on top of that is a third edge describing an edge that is already
+     there. Removing it also gives `focused` something unambiguous to say: the
+     ring is now PRESENT vs ABSENT rather than one shade of grey vs another,
+     which is the state it was failing to communicate. */
+  .pane {
+    position: absolute; inset: 0;
+    border-radius: var(--radius);
+    overflow: hidden;
+    outline: none;
+  }
+  /* z-index 9: ABOVE every piece of pane chrome (control 4, popup 5, settings
+     6). The border is the pane's outline and nothing may break it — the corner
+     control used to paint over the top-right arc, so a focused pane's ring had
+     a visible notch in it. Now the ring is painted last, over everything. */
+  .pane-edge {
+    position: absolute; inset: 0; z-index: 9;
+    border-radius: var(--radius);
+    pointer-events: none;
+    /* Rest: nothing. Focus: a 2px inset ring. Because the ring is INSET and the
+       overlay is a sibling that changes no geometry, the terminal underneath
+       does not move or resize by a pixel when focus arrives — which is the
+       property that made an overlay the right answer in the first place. */
+    box-shadow: none;
+    transition: box-shadow .14s ease;
+  }
+  .pane.focused .pane-edge { box-shadow: inset 0 0 0 2px var(--t-ring); }
+  @media (prefers-reduced-motion: reduce) { .pane-edge { transition: none; } }
+
+  .term {
+    position: absolute; inset: 0;
+    padding: 10px 12px;
+    overflow: hidden;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+    background: var(--t-bg);
+    color: var(--t-fg);
+  }
+  .term-row { display: block; }
+  .xterm-term { padding:0; }
+  .xterm-term::before { z-index:0; }
+  .xterm-host { position:absolute;inset:7px 8px;z-index:1; }
+  .xterm-term .xterm, .xterm-term .xterm-viewport, .xterm-term .xterm-screen { background:transparent !important; }
+  /* tmux owns history/copy-mode when persistence is enabled. Hiding xterm's
+     viewport scrollbar avoids two competing scroll positions; wheel events
+     still reach xterm and are encoded as mouse input once tmux enables mouse. */
+  .tmux-terminal .xterm-viewport { overflow-y:hidden !important; scrollbar-width:none; }
+  .tmux-terminal .xterm-viewport::-webkit-scrollbar { display:none; }
+  /* A quiet overlay-like scrollbar: transparent track, rounded theme-derived
+     thumb. Applied to every app scroll surface; tmux panes still hide theirs. */
+  * { scrollbar-width:thin;scrollbar-color:color-mix(in srgb,var(--ui-muted) 48%,transparent) transparent; }
+  *::-webkit-scrollbar { width:8px;height:8px; }
+  *::-webkit-scrollbar-track { background:transparent; }
+  *::-webkit-scrollbar-thumb { background:color-mix(in srgb,var(--ui-muted) 48%,transparent);border:2px solid transparent;border-radius:999px;background-clip:padding-box; }
+  *::-webkit-scrollbar-thumb:hover { background:color-mix(in srgb,var(--ui-muted) 72%,transparent);border:2px solid transparent;background-clip:padding-box; }
+  *::-webkit-scrollbar-corner { background:transparent; }
+  .xterm-suspended .xterm-host { visibility:hidden; }
+  .connection-state { position:absolute;inset:0;display:grid;place-items:center;color:var(--t-dim);background:color-mix(in srgb,var(--t-bg) 88%,transparent);font:12px var(--mono); }
+  .copy-toast { position:absolute;z-index:8;left:50%;bottom:12px;transform:translateX(-50%);padding:5px 9px;border-radius:6px;background:var(--t-fg);color:var(--t-bg);font:11px var(--sans);box-shadow:0 5px 16px color-mix(in srgb,var(--t-bg) 60%,transparent); }
+  .setup-notice { position:absolute;z-index:12;left:50%;bottom:18px;transform:translateX(-50%);display:flex;align-items:center;gap:8px;max-width:calc(100% - 36px);padding:8px 10px;border-radius:8px;background:var(--ui-raised);color:var(--ui-ink);box-shadow:0 8px 28px color-mix(in srgb,var(--t-bg) 60%,transparent),inset 0 0 0 1px var(--ui-edge);font:11px var(--sans); }
+  .setup-notice span { color:var(--ui-muted); }
+  .setup-notice code { overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:38vw;padding:4px 6px;border-radius:4px;background:var(--ui-field);font-family:var(--mono); }
+  .setup-notice button { flex:0 0 auto;padding:5px 8px;border-radius:5px;background:var(--ui-active); }
+  .first-run p { color:var(--ui-muted); }
+  .tmux-first { display:flex;gap:8px;align-items:center;margin:12px 0;color:var(--ui-ink); }
+  @media(max-width:760px){.setup-notice{align-items:stretch;flex-direction:column}.setup-notice code{max-width:75vw}}
+  .term-link { text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+  .term-link:hover { filter: brightness(1.25); }
+  /* Keep the workspace's patterned terminal surface during resize; only the
+     expensive terminal content disappears. */
+  .resize-placeholder { display: block; }
+  .resize-placeholder::after { content: none; }
+  /* NOTHING here reacts to :hover. An earlier pass reserved a gutter while the
+     chrome was up so output could not be struck through — but that reflowed
+     the text under the pointer, which in a terminal is unacceptable: a real
+     PTY's glyph grid does not move because a mouse crossed it. The control
+     floats OVER the top-right corner instead (opaque, tiny, one glyph). */
+  /* Column width is set inline from the longest entry, exactly like real `ls`
+     (which pads every column to the longest name + a 2-space gutter), so the
+     grid reflows to the pane instead of being pinned to a guessed width. */
+  .ls { display: grid; column-gap: 2ch; }
+  .ls > span { overflow: hidden; text-overflow: ellipsis; }
+  /* Steady, never blinking: a dozen panes each blinking on their own phase was
+     the single most distracting thing on screen. Real ttyd gets the same
+     treatment via `-t cursorBlink=false`. */
+  .cursor {
+    display: inline-block; width: 1ch; height: 1.15em; vertical-align: text-bottom;
+    background: var(--t-cursor); opacity: .85;
+  }
+
+  /* ---------- terminal skeleton (boot / reconnect placeholder) ---------- */
+  .term.skeleton { display: flex; flex-direction: column; gap: 9px; padding-top: 13px; }
+  .sk-line { height: 8px; border-radius: 4px; background: var(--t-skel); }
+  .sk-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 9px; }
+  .term-body { animation: term-in .22s ease-out both; }
+
+  /* ---------- pane chrome : ONE resting control ----------
+     Fades in place — it must never TRANSLATE, or the eye reads the movement as
+     the terminal shifting under it.
+
+     It floats OVER the corner rather than pushing text aside, so it does cover
+     whatever is under it while up. That is the lesser evil: reserving a gutter
+     reflows the grid (unacceptable), and the cost is bounded to one opaque 22px
+     glyph in the corner, on hover only.
+
+     Inset by 7px — more than the 2px ring plus the corner radius — so it sits
+     fully INSIDE the border with air around it. A radial scrim used to bleed
+     the pane background out to 56px here, which painted straight over the
+     top-right arc of the ring; the button's own opaque background does the same
+     job inside a box that cannot reach the edge. */
+  .pane-hotspot { position:absolute; top:0; right:0; width:54px; height:54px; z-index:3; }
+  .rail-pane {
+    position: absolute; top: 7px; right: 7px; z-index: 4;
+    pointer-events:auto;
+  }
+  .rail-pane > .pico { opacity:0; pointer-events:auto; transition:opacity .12s; }
+  .pane-hotspot:hover + .rail-pane > .pico, .rail-pane:hover > .pico,
+  .rail-pane.open > .pico, .rail-pane:focus-within > .pico { opacity:1; }
+  @media (prefers-reduced-motion: reduce) { .rail-pane { transition: none; } }
+  .pico {
+    position: relative;
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 22px; height: 22px; border-radius: 5px;
+    color: var(--t-fg); opacity: .82; transition: background .12s, opacity .12s;
+  }
+  .rail-pane > .pico { background: var(--t-bg); box-shadow: 0 0 0 1px var(--t-edge); }
+  .pico:hover { background: color-mix(in srgb, var(--t-fg) 16%, transparent); opacity: 1; }
+  .pico:focus-visible { outline: 2px solid var(--t-ring); outline-offset: 1px; opacity: 1; }
+  .pico.danger:hover { background: color-mix(in srgb, var(--t-red) 30%, transparent); }
+  .pico svg { width: 14px; height: 14px; }
+  /* persistence rides ON the single control instead of adding a second glyph */
+  .pico.persist::after {
+    content: ""; position: absolute; top: 1px; right: 1px;
+    width: 5px; height: 5px; border-radius: 50%; background: var(--t-green);
+  }
+
+  /* The one popup: settings · close, then a row of column-splits and a row of
+     row-splits. It is a SIBLING of the button rail, not a child — nested, it
+     inherited the rail's own 0→1 hover fade and rendered half-transparent with
+     terminal text showing through it. */
+  .panepop {
+    position: absolute; top: 36px; right: 7px; z-index: 5;
+    display: grid; grid-template-columns: repeat(3, 26px); gap: 3px;
+    padding: 4px; border-radius: 8px;
+    background: var(--t-bg);
+    box-shadow:0 0 0 1px var(--t-edge),0 8px 24px color-mix(in srgb,var(--t-bg) 68%,transparent);
+    animation: pop-in .13s ease-out both;
+  }
+  .panepop .pico { width:26px;height:26px;opacity:.86; }
+  .panepop .pico:disabled { visibility:hidden;pointer-events:none; }
+  .panepop .row-end { grid-column: 3; }
+  /* a hairline between the two split axes, so the rows read as two choices */
+  .panepop .axis-top { box-shadow: 0 -1px 0 var(--t-edge); padding-top: 4px; margin-top: 1px; }
+
+  .empty-add { position: absolute; inset: 0; display: grid; place-items: center; }
+  .empty-add .ico {
+    width: 46px; height: 46px; border-radius: 10px;
+    color: var(--stage-ink);
+    box-shadow: inset 0 0 0 1px var(--stage-edge); background: var(--stage-panel);
+  }
+  .empty-add .ico:hover { background: var(--stage-panel); color: var(--stage-accent); }
+  .empty-add .ico svg { width: 20px; height: 20px; }
+
+  /* =========================================================================
+     ANIMATION — restrained, and entirely off under prefers-reduced-motion.
+     ========================================================================= */
+  @keyframes term-in    { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes pop-in     { from { opacity: 0; transform: translateY(-4px) scale(.97); } }
+  @keyframes pane-in    { from { opacity: 0; } }
+  @keyframes pane-out   { to   { opacity: 0; } }
+  @keyframes shimmer    { to   { opacity: .38; } }
+
+  /* A workspace switch is NOT animated. Every folder is already mounted, so
+     showing one is a paint, not a transition — a 260ms fade made switching
+     feel slower than the terminals it was decorating, and replayed a "boot"
+     for sessions that had been alive the whole time. Panes keep a short
+     opacity-only entrance: it changes no geometry, so terminal text never
+     moves. (An earlier scale() on .pane did move it, which is why it is gone.) */
+  @media (prefers-reduced-motion: no-preference) {
+    .pane { animation: pane-in .14s linear both; }
+    .pane.closing { animation: pane-out .14s linear both; pointer-events: none; }
+    .sk-line { animation: shimmer 1s ease-in-out infinite alternate; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .term-body, .panepop { animation: none; }
+  }
+
+  /* =========================================================================
+     DIALOGS — the only place words are allowed outside a terminal.
+     ========================================================================= */
+  dialog {
+    width: min(520px, calc(100vw - 32px));
+    padding: 0; border: 0; border-radius: 12px;
+    background: var(--panel); color: var(--ink);
+    box-shadow: 0 24px 70px color-mix(in srgb,var(--t-bg) 55%,transparent);
+  }
+  dialog::backdrop { background:var(--ui-scrim);backdrop-filter:blur(2px); }
+  dialog.wide { width: min(560px, calc(100vw - 32px)); }
+  .dlg { padding:18px 20px 16px;position:relative;display:flex;flex-direction:column;max-height:min(82vh,720px); }
+  .dlg-head { position:relative;flex:0 0 auto; }
+  .dlg-head h2 { padding-right:34px; }
+  .dlg-desc { margin:-7px 34px 14px 0;color:var(--muted);font-size:12px;line-height:1.45; }
+  .dlg-body { min-height:0;overflow:auto; }
+  .dlg > .actions { flex:0 0 auto; }
+  .dialog-x { position:absolute;top:12px;right:12px;display:grid;place-items:center;width:28px;height:28px;border-radius:6px;color:var(--muted); }
+  .dialog-x:hover { background:var(--ui-hover);color:var(--ink); }
+  .dialog-x:focus-visible { outline:2px solid var(--ui-accent); }
+  .dialog-x svg { width:15px;height:15px; }
+  .folder-dialog h2 { padding-right:34px; }
+  .confirm-close p { color:var(--muted); }
+  .dlg h2 { margin: 0 0 14px; font-size: 15px; font-weight: 650; letter-spacing: .01em; }
+  .field { margin-bottom: 12px; }
+  .field > label { display: block; margin-bottom: 5px; font-size: 12px; color: var(--muted); }
+  .field > label.check-row { display:flex;align-items:center;gap:7px;text-transform:none;letter-spacing:normal;color:var(--ink); }
+  .field input[type=text], .field select, .field textarea {
+    width: 100%; padding: 8px 10px;
+    border: 1px solid var(--line); border-radius: 6px; background: var(--ui-field); outline: none;
+  }
+  .field input[type=text]:focus, .field select:focus, .field textarea:focus {
+    border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb,var(--accent) 24%,transparent); background: var(--ui-field);
+  }
+  .field textarea { font-family: var(--mono); font-size: 11.5px; line-height: 1.5; resize: vertical; min-height: 210px; }
+  .field .mono { font-family: var(--mono); font-size: 12.5px; }
+  .check { display: flex; gap: 9px; align-items: flex-start; padding: 9px 11px; border: 1px solid var(--line); border-radius: 7px; background: var(--ui-field); }
+  .check:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb,var(--accent) 20%,transparent); }
+  .check input { margin: 2px 0 0; }
+  .check b { display: block; font-size: 13px; font-weight: 600; }
+  .check small { color: var(--muted); }
+  .hint { margin: 6px 0 0; font-size: 11.5px; color: var(--muted); line-height: 1.45; }
+  .hint code { font-family: var(--mono); background: var(--ui-hover); color: var(--ui-ink); padding: 1px 4px; border-radius: 3px; }
+  kbd {
+    font-family: var(--mono); font-size: 10.5px; background: var(--ui-hover); color: var(--ui-ink);
+    border: 1px solid var(--ui-edge); border-bottom-width: 2px; border-radius: 4px; padding: 1px 4px;
+  }
+  .warn { color: var(--ui-warn); }
+  .err { color: var(--danger); }
+
+  /* ---------- theme picker : swatches, not a <select> ----------
+     A dropdown hides every option behind a click and names colours in words.
+     These show the palette itself and apply on pick, so the terminal behind the
+     picker repaints as the pointer moves across it — the choice IS the preview.
+     Radio semantics (radiogroup + roving tabindex) so it is one tab stop with
+     arrow keys inside, exactly like the select it replaced. */
+  /* The picker's accent is declared by WHERE it lives, never inherited from
+     whichever theme is being previewed — otherwise picking a dark theme would
+     dim the very control you are using to pick it. */
+  .themes { display: flex; flex-wrap: wrap; gap: 6px; --pick-accent: var(--ui-accent); --pick-dash: var(--ui-accent); }
+  .themes.sm { gap: 4px; --pick-accent: var(--t-ring); --pick-dash: var(--t-edge); }
+
+  /* Each option is a MINIATURE TERMINAL: the theme's own background carrying a
+     few lines of its own accent colours. A colour NAME in a dropdown told the
+     user nothing; this is the thing itself at 1/40 scale, and picking it
+     repaints the real one behind the picker. */
+  .theme-opt {
+    display: flex; flex-direction: column; justify-content: center; gap: 2px;
+    width: 44px; height: 30px; padding: 5px 6px;
+    border-radius: 5px;
+    box-shadow: inset 0 0 0 1px var(--pick-dash);
+    transition: box-shadow .1s;
+  }
+  .theme-opt i { display: block; height: 2px; border-radius: 1px; }
+  .theme-opt:hover { box-shadow: inset 0 0 0 1px var(--pick-accent); }
+  .theme-opt:focus-visible { outline: 2px solid var(--pick-accent); outline-offset: 2px; }
+  .theme-opt[aria-checked="true"] { box-shadow: inset 0 0 0 2px var(--pick-accent); }
+  /* the inherit option: the same chip, dashed, previewing what it inherits */
+  .theme-opt.inherit { border: 1px dashed var(--pick-dash); }
+
+  /* Sized so all seven options (six themes + inherit) fit one row inside the
+     narrowest pane the layout allows: 7×28 + 6×4 = 220px, against 226px of
+     usable width in a 260px pane. */
+  .themes.sm .theme-opt { width: 28px; height: 22px; padding: 4px; gap: 1.5px; border-radius: 4px; }
+  .themes.sm .theme-opt i { height: 1.5px; }
+  .themes.color-circles { gap:8px; }
+  .themes.color-circles .theme-opt { width:22px;height:22px;padding:0;border-radius:50%;box-shadow:inset 0 0 0 1px var(--t-edge); }
+  .themes.color-circles .theme-opt[aria-checked="true"] { box-shadow:0 0 0 2px var(--t-bg),0 0 0 4px var(--t-ring); }
+
+  /* ---------- pane settings : a popover ON the pane it configures ----------
+     Not a modal. A dialog dimmed the whole window to change one terminal, and
+     put the thing being configured behind a scrim while you configured it. This
+     sits in the pane's own corner, in the pane's own palette, so a theme pick
+     repaints the surface directly underneath the picker.
+
+     Inset like the rest of the chrome so it cannot touch the border, and capped
+     to the pane's box so a narrow pane scrolls it instead of overflowing. */
+  .panesettings { width:min(440px,calc(100vw - 32px));background:var(--panel);color:var(--ink); }
+  .ps-head { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+  .ps-title { flex: 1; font-size: 11px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--t-dim); }
+  .ps-row { margin-bottom: 9px; }
+  .ps-row:last-child { margin-bottom: 0; }
+  /* A CLASS, not a bare `label`. `.ps-row > label` (0,1,1) outranked `.ps-check`
+     (0,1,0), so the tmux row inherited the caption's uppercase, its dim colour
+     and `display:block` — the checkbox lost its flex row and its gap and the
+     control read as a disabled heading. Captions opt in by name now. */
+  .ps-label { display: block; margin-bottom: 4px; font-size: 10.5px; letter-spacing: .05em; text-transform: uppercase; color: var(--t-dim); }
+  .ps-input {
+    width: 100%; padding: 6px 8px;
+    font-family: var(--mono); font-size: 12px;
+    color: var(--t-fg);
+    background: color-mix(in srgb, var(--t-fg) 9%, var(--t-bg));
+    border: 1px solid var(--t-edge); border-radius: 6px; outline: none;
+  }
+  .ps-input:focus { border-color: var(--t-ring); box-shadow: 0 0 0 2px color-mix(in srgb, var(--t-ring) 35%, transparent); }
+  .ps-check { display: flex; align-items: center; gap: 7px; font-size: 12px; cursor: pointer; }
+  .ps-check input { accent-color: var(--t-ring); width: 14px; height: 14px; margin: 0; }
+  .ps-check:focus-within { outline: 2px solid var(--t-ring); outline-offset: 3px; border-radius: 4px; }
+  .ps-note { margin: 4px 0 0; font-size: 10.5px; line-height: 1.45; color: var(--t-dim); }
+  .ps-note.warn { color: var(--t-yellow); }
+
+  /* workspace icon picker */
+  .iconpick {
+    display: grid; grid-template-columns: repeat(12, 1fr); gap: 4px;
+    max-height: 152px; overflow-y: auto;
+    padding: 7px; border: 1px solid var(--line); border-radius: 7px; background: var(--ui-field);
+  }
+  .iconpick button {
+    display: inline-flex; align-items: center; justify-content: center;
+    aspect-ratio: 1; border-radius: 6px; color: var(--muted);
+    font-size: 10px; font-weight: 650;
+  }
+  .iconpick button svg { width: 15px; height: 15px; }
+  .iconpick button:hover { background: var(--ui-hover); color: var(--ink); }
+  .iconpick button.on { background:var(--ui-active);color:var(--ui-selected-ink);box-shadow:inset 0 0 0 2px var(--accent); }
+  .iconpick button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  .actions { display: flex; align-items: center; gap: 8px; margin-top: 16px; }
+  .actions .spacer { flex: 1; }
+  .btn { padding: 7px 13px; border: 1px solid var(--line); border-radius: 7px; background: var(--ui-field); color: var(--ink); font-size: 13px; font-weight: 550; }
+  .btn:hover { background:var(--ui-hover); }
+  .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  /* white on --ui-accent measures 6.11:1 — AA for normal text, not just large */
+  .btn.primary { border-color:var(--accent);background:var(--ui-active);color:var(--ui-selected-ink);box-shadow:inset 0 0 0 1px var(--accent); }
+  .btn.primary:hover { background: var(--ui-hover); }
+  .btn.ghost-danger { border-color: transparent; color: var(--danger); }
+  .btn.ghost-danger:hover { background: var(--ui-hover); }
+
+  /* ---------- command palette ---------- */
+  dialog.palette { width: min(580px, calc(100vw - 32px)); }
+  .pal-input {
+    width: 100%; padding: 14px 16px; border: 0; outline: none;
+    font-size: 14.5px; background: transparent;
+    box-shadow: inset 0 -1px 0 var(--line);
+  }
+  .pal-list { max-height: 344px; overflow-y: auto; padding: 6px; }
+  .pal-row {
+    display: flex; align-items: center; gap: 10px; width: 100%;
+    padding: 7px 9px; border-radius: 7px; text-align: left; cursor: pointer;
+  }
+  .pal-row.on { background:var(--ui-active);color:var(--ui-selected-ink); }
+  .pal-row.on .pal-title,.pal-row.on .pal-sub { color:var(--ui-selected-ink); }
+  .pal-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .pal-badge {
+    flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+    width: 24px; height: 24px; border-radius: 6px;
+    background: var(--p-bg); color: var(--p-fg);
+    font-size: 10px; font-weight: 650; text-transform: uppercase;
+  }
+  .pal-badge svg { width: 14px; height: 14px; }
+  .pal-main { flex: 1; min-width: 0; }
+  .pal-title { display: block; font-size: 13px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pal-title .mono { font-family: var(--mono); font-size: 12.5px; }
+  .pal-sub { display: block; font-size: 11.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pal-dot { flex:0 0 auto;width:6px;height:6px;border-radius:50%;background:var(--ui-success); }
+  .pal-empty { padding: 22px 16px; text-align: center; font-size: 13px; color: var(--muted); }
+  .pal-foot { display: flex; gap: 14px; padding: 9px 14px; font-size: 11px; color: var(--muted); box-shadow: inset 0 1px 0 var(--line); }
+  .pal-foot span { display:inline-flex;align-items:center;gap:4px; }
+  .shortcut-group { margin:0 0 18px; }
+  .shortcut-group:last-child { margin-bottom:0; }
+  .shortcut-group h3 { margin:0 0 7px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted); }
+  .shortcut-row { display:grid;grid-template-columns:minmax(130px,auto) 1fr;align-items:center;gap:16px;padding:6px 0; }
+  .shortcut-row kbd { justify-self:start; }
+  .shortcut-row span { font-size:12.5px;color:var(--ink); }
+
+/* v5: explicit globally themed chrome, workspace identity patterns, settings sheet */
+.rail-global { display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:6px;color:var(--ui-muted); }
+.rail-global:hover { background:var(--ui-hover);color:var(--ui-ink); }
+.rail-global:focus-visible { outline:2px solid var(--ui-accent); }
+.rail-global svg { width:15px;height:15px; }
+.term { font-size:var(--term-font-size,13px);font-weight:var(--term-font-weight,400); }
+/* Pattern is terminal-only and deliberately low-ink: workspace identity without color. */
+.term::before { content:"";position:absolute;inset:0;pointer-events:none;z-index:0; }
+.term-body { position:relative;z-index:1; }
+.pattern-dots::before { background-image:radial-gradient(var(--t-pattern) .65px,transparent .75px);background-size:13px 13px; }
+.pattern-grid::before { background-image:linear-gradient(var(--t-pattern) .6px,transparent .6px),linear-gradient(90deg,var(--t-pattern) .6px,transparent .6px);background-size:24px 24px; }
+.pattern-diagonal::before { background-image:repeating-linear-gradient(135deg,transparent 0 12px,var(--t-pattern) 12px 12.7px); }
+.pattern-cross::before { background-image:linear-gradient(var(--t-pattern) .7px,transparent .7px),linear-gradient(90deg,var(--t-pattern) .7px,transparent .7px);background-size:32px 32px;background-position:16px 16px; }
+.pattern-waves::before { background-image:radial-gradient(ellipse at center,transparent 64%,var(--t-pattern) 66%,transparent 68%);background-size:30px 12px; }
+.pattern-bricks::before { background-image:linear-gradient(var(--t-pattern) .7px,transparent .7px),linear-gradient(90deg,var(--t-pattern) .7px,transparent .7px);background-size:28px 14px;background-position:0 0,14px 7px; }
+.folder-badge::after { content:"";position:absolute;width:20px;height:3px;bottom:3px;left:16px;border-radius:2px;background:currentColor;opacity:.75; }
+.folder:nth-child(3n+2) .folder-badge::after { background:repeating-linear-gradient(90deg,currentColor 0 2px,transparent 2px 4px); }
+.folder:nth-child(3n) .folder-badge::after { height:4px;background:radial-gradient(currentColor 1px,transparent 1px);background-size:4px 4px; }
+.pattern-choices { display:grid;grid-template-columns:repeat(4,1fr);gap:6px; }
+.pattern-chip { height:46px;border-radius:7px;background:var(--ui-field);box-shadow:inset 0 0 0 1px var(--ui-edge);position:relative;overflow:hidden;color:var(--ui-muted); }
+.pattern-chip::before { content:"";position:absolute;inset:0;opacity:1;background-color:var(--ui-field); }
+.pattern-chip.pattern-dots::before { background-image:radial-gradient(var(--ui-edge) .8px,transparent .9px);background-size:10px 10px; }
+.pattern-chip.pattern-grid::before { background-image:linear-gradient(var(--ui-edge) .7px,transparent .7px),linear-gradient(90deg,var(--ui-edge) .7px,transparent .7px);background-size:16px 16px; }
+.pattern-chip.pattern-diagonal::before { background-image:repeating-linear-gradient(135deg,transparent 0 9px,var(--ui-edge) 9px 10px); }
+.pattern-chip.pattern-cross::before { background-image:linear-gradient(var(--ui-edge) .8px,transparent .8px),linear-gradient(90deg,var(--ui-edge) .8px,transparent .8px);background-size:22px 22px;background-position:11px 11px; }
+.pattern-chip.pattern-waves::before { background-image:radial-gradient(ellipse at center,transparent 62%,var(--ui-edge) 65%,transparent 68%);background-size:24px 10px; }
+.pattern-chip.pattern-bricks::before { background-image:linear-gradient(var(--ui-edge) .7px,transparent .7px),linear-gradient(90deg,var(--ui-edge) .7px,transparent .7px);background-size:24px 12px;background-position:0 0,12px 6px; }
+.pattern-chip span { position:relative;z-index:1;font:11px var(--mono);padding:2px 5px;border-radius:3px;background:color-mix(in srgb,var(--ui-field) 82%,transparent); }
+.pattern-chip.on { box-shadow:inset 0 0 0 3px var(--ui-accent);color:var(--ui-ink); }
+.global-settings { min-width:0; }
+.font-groups { display:flex;gap:5px;flex-wrap:wrap; }
+.font-groups button { display:inline-flex;align-items:center;justify-content:center;min-width:42px;height:42px;padding:4px;border-radius:6px;background:var(--ui-field);box-shadow:inset 0 0 0 1px var(--ui-edge);font-family:var(--mono); }
+.font-groups button.on { background:var(--ui-active);color:var(--ui-selected-ink);box-shadow:inset 0 0 0 2px var(--ui-accent); }
+.weight-groups { display:grid;grid-template-columns:repeat(3,1fr);gap:5px; }
+.weight-groups button { height:38px;padding:4px 8px;border-radius:6px;background:var(--ui-field);box-shadow:inset 0 0 0 1px var(--ui-edge); }
+.weight-groups button.on { background:var(--ui-active);color:var(--ui-selected-ink);box-shadow:inset 0 0 0 2px var(--ui-accent); }
+/* Context menus are positioned inline; disable the corner default when left is supplied. */
+.panepop[style*="left"] { transform:none;animation:none; }
+/* 3px, high-contrast active indicator; color is optional pane preference. */
+.pane.focused .pane-edge { box-shadow:inset 0 0 0 3px var(--t-ring); }

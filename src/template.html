@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ttyd workspace</title>
+
+<!--
+  ttyd workspace — SINGLE-FILE workspace shell (design pass, no ttyd wired yet).
+
+  What this is
+  ------------
+  A tmuxinator-shaped workspace that is meant to ship as ONE html file the user
+  downloads (and later: that ttyd itself serves via `ttyd -I workspace.html`).
+  Folders (workspaces) live in the left rail; each folder owns a split tree of
+  panes; every pane is a terminal. The whole configuration is one JSON object in
+  localStorage, copy/paste-able for backup + restore.
+
+  Design law followed here
+  ------------------------
+  The only TEXT outside a terminal is the product name (`ttydterm`, once, at the
+  top of the rail) and the workspace names under it. Every control is a
+  pictogram, revealed on hover, or lives inside an overlay: a dialog, the
+  command palette, or a pane's own settings popover — those three may show
+  words because the user opened them to read words.
+
+  Four rules the layout obeys, each one earned
+  -------------------------------------------
+  1. NOTHING MOVES THAT THE USER DID NOT MOVE. Hovering a pane does not reflow
+     its text; focusing one does not resize its border; collapsing the sidebar
+     does not relocate a single icon. A terminal is a fixed glyph grid and the
+     chrome around it has to behave like one.
+  2. CONTRAST IS MEASURED, NOT EYEballed. Every theme colour that carries text
+     clears WCAG AA (4.5:1) on its own background, and every control, border and
+     focus ring clears 3:1. test.mjs recomputes the matrix and fails the run.
+  3. A WORKSPACE SWITCH IS A PAINT, NOT A TRANSITION. All folders stay mounted;
+     switching raises one. Note HOW they are hidden: `display:none` would be
+     wrong even with every animation deleted, because restoring a display
+     property RESTARTS every CSS animation in the subtree — so each switch
+     replayed the panes' entrance and read as a re-boot of sessions that had
+     been alive all along. Inactive surfaces keep their box and lose only
+     `visibility`, which starts nothing.
+  4. A SETTING TAKES EFFECT WHEN YOU CHOOSE IT. There is no Save button on a
+     pane or a folder: picking a theme repaints the terminal under the picker,
+     typing a command re-runs it, ticking tmux flips the marker. Save/Cancel
+     asks the user to describe a change and then confirm it; a live control
+     just shows them.
+
+  Terminals are MOCKED
+  --------------------
+  `mockTerminal()` is the one seam that ttyd replaces. It returns styled spans
+  (a prompt, a colourful `ls`, then the pane's own command) purely so the theme
+  palettes are visible. Swap that function for an xterm.js instance bound to
+  ttyd's /ws and nothing else in this file needs to move.
+
+  When that happens, start xterm with `cursorBlink: false` (ttyd's equivalent:
+  `-t cursorBlink=false`). A blinking block in every pane at once reads as
+  noise, which is why the mock draws a steady cursor.
+
+  One audited global palette
+  --------------------------
+  Every theme carries terminal colours plus explicit accessible UI tokens for
+  the sidebar, fields, menus, sheets and dialogs. Theme changes therefore reach
+  the whole app without relying on fixed color-mix percentages. Each workspace
+  keeps a non-colour terminal pattern as a stable identity cue.
+
+  React 18 and the compiled application are bundled inline by build.mjs, so the
+  generated HTML has no runtime network dependency. Styling is hand-written CSS
+  rather than the house Tailwind+daisyUI default — this is a bespoke split-tree
+  canvas with a dark content surface and no daisyUI component would have been
+  used. Fonts are system sans + system mono only.
+-->
+
+<style>
+/*__TTYDTERM_STYLES__*/
+</style>
+
+<script>
+  /* Paint the last-known workspace background before React boots, so a refresh
+     fades in from the right colour instead of flashing white. */
+  try {
+    var b = localStorage.getItem('ttyd-workspace-bg');
+    if (b) document.documentElement.style.setProperty('--boot-bg', b);
+  } catch (e) {}
+</script>
+
+</head>
+
+<body>
+<div id="root"></div>
+
+<script>
+/*__TTYDTERM_APP__*/
+</script>
+</body>
+</html>

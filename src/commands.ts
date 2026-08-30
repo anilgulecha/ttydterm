@@ -40,16 +40,46 @@ export const ttydSessionName = (folderLabel: string, paneId: string): string =>
     .replace(/[^a-z0-9_-]+/g, '-')
     .slice(0, 64);
 
-export const tmuxLaunchCommand = (cwd: string, session: string): string => {
-  const target = shellQuote(session);
-  return `cd -- ${cwd} && (tmux has-session -t ${target} 2>/dev/null || tmux new-session -d -s ${target}) && tmux set-option -t ${target} mouse on && tmux set-option -t ${target} status off && (tmux unbind-key -n MouseDown3Pane 2>/dev/null || true) && exec tmux attach-session -t ${target}`;
+const BASH_INTEGRATION = [
+  `__ttydterm_emit(){ if [ -n "${'${TMUX-}'}" ]; then printf '\\033Ptmux;\\033\\033]133;%s\\007\\033\\\\' "$1"; else printf '\\033]133;%s\\007' "$1"; fi; }`,
+  `__ttydterm_preexec(){ __ttydterm_emit 'C;ttydterm'; }`,
+  `__ttydterm_precmd(){ local s=$?; __ttydterm_emit "D;$s;ttydterm"; __ttydterm_emit 'A;ttydterm'; return "$s"; }`,
+  `PS0='$(__ttydterm_preexec)'"${'${PS0-}'}"`,
+  `if declare -p PROMPT_COMMAND 2>/dev/null | grep -q 'declare \\-a'; then PROMPT_COMMAND=(__ttydterm_precmd "${'${PROMPT_COMMAND[@]}'}"); else PROMPT_COMMAND="__ttydterm_precmd${'${PROMPT_COMMAND:+;${PROMPT_COMMAND}}'}"; fi`,
+].join('; ');
+
+const integrationSetup = (name: string): { setup: string; rcPath: string } => {
+  const directory = `"$HOME/.cache/ttydterm"`;
+  const rcPath = `"$HOME/.cache/ttydterm/${name}.bashrc"`;
+  const initialCommand = `if [ -n "${'${TTYDTERM_INITIAL_COMMAND+x}'}" ]; then __ttydterm_command=$TTYDTERM_INITIAL_COMMAND; unset TTYDTERM_INITIAL_COMMAND; __ttydterm_preexec; ( eval -- "$__ttydterm_command" ); __ttydterm_status=$?; __ttydterm_emit "D;$__ttydterm_status;ttydterm"; unset __ttydterm_command __ttydterm_status; fi`;
+  const startup = `if [ -r "$HOME/.bashrc" ]; then . "$HOME/.bashrc"; fi; ${BASH_INTEGRATION}; ${initialCommand}; rm -f -- "${'${BASH_SOURCE[0]}'}"`;
+  return { setup:`umask 077; mkdir -p ${directory} && chmod 700 ${directory} && printf '%s\\n' ${shellQuote(startup)} > ${rcPath}`, rcPath };
 };
 
-export const paneLaunchCommand = ({ cwd, command, persist, folderLabel, paneId }: PaneLaunchOptions): string => {
-  const safeCwd = shellCwd(cwd);
-  const launch = persist
-    ? tmuxLaunchCommand(safeCwd, ttydSessionName(folderLabel, paneId))
-    : `cd -- ${safeCwd} && ${command || 'exec bash -l'}`;
+const integratedBash = (command: string, rcPath: string): string => {
+  const userCommand = command.trim();
+  const initial = !userCommand || /^(?:exec +)?bash(?: +-(?:i|l|il|li))?$/.test(userCommand)
+    ? '' : `TTYDTERM_INITIAL_COMMAND=${shellQuote(userCommand)} `;
+  return `${initial}exec bash --noprofile --rcfile ${rcPath} -i`;
+};
 
-  return `printf '\\033[2J\\033[H'; ${launch}`;
+export const tmuxLaunchCommand = (cwd: string, session: string, command = 'bash', shellIntegration = false): string => {
+  const target = shellQuote(session);
+  const integration = integrationSetup(session);
+  const waitForClient = `while ! tmux list-clients -F '#{client_session}' 2>/dev/null | grep -Fxq ${target}; do sleep .05; done`;
+  const newSession = shellIntegration
+    ? `(${integration.setup} && tmux new-session -d -s ${target} ${shellQuote(`${waitForClient}; ${integratedBash(command, integration.rcPath)}`)})`
+    : `tmux new-session -d -s ${target}`;
+  const passthrough = shellIntegration ? ` && (tmux set-option -t ${target} allow-passthrough on 2>/dev/null || true)` : '';
+  return `cd -- ${cwd} && (tmux has-session -t ${target} 2>/dev/null || ${newSession}) && tmux set-option -t ${target} mouse on && tmux set-option -t ${target} status off${passthrough} && (tmux unbind-key -n MouseDown3Pane 2>/dev/null || true) && exec tmux attach-session -t ${target}`;
+};
+
+export const paneLaunchCommand = ({ cwd, command, persist, folderLabel, paneId, shellIntegration = false }: PaneLaunchOptions): string => {
+  const safeCwd = shellCwd(cwd);
+  const userCommand = command || 'bash';
+  const session = ttydSessionName(folderLabel, paneId);
+  if (persist) return `printf '\\033[2J\\033[H'; ${tmuxLaunchCommand(safeCwd, session, userCommand, shellIntegration)}`;
+  if (!shellIntegration) return `printf '\\033[2J\\033[H'; cd -- ${safeCwd} && ${userCommand}`;
+  const integration = integrationSetup(session);
+  return `printf '\\033[2J\\033[H'; ${integration.setup} && cd -- ${safeCwd} && ${integratedBash(userCommand, integration.rcPath)}`;
 };

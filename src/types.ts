@@ -72,6 +72,7 @@ export interface UiState {
   railOpen: boolean;
   fontSize: number;
   fontWeight: FontWeight;
+  notifyOnCommandFinish: boolean;
 }
 
 export interface Config {
@@ -112,4 +113,5 @@ export interface PaneLaunchOptions {
   persist: boolean;
   folderLabel: string;
   paneId: string;
+  shellIntegration?: boolean;
 }

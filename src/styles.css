@@ -157,6 +157,11 @@
   .folder-badge svg { width: 16px; height: 16px; }
 
   .folder-name { flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+  .folder-complete {
+    position:absolute;left:37px;top:7px;width:8px;height:8px;pointer-events:none;
+    border-radius:50%;background:var(--ui-active);box-shadow:0 0 0 2px var(--ui-panel);
+  }
+  .folder.active .folder-complete { background:var(--ui-active-ink);box-shadow:0 0 0 2px var(--ui-active); }
 
 
   .folder-actions {

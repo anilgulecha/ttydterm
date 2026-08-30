@@ -44,6 +44,9 @@ interface XtermTerminal {
   readonly cols: number;
   readonly rows: number;
   options: XtermOptions;
+  parser: {
+    registerOscHandler(identifier: number, handler: (data: string) => boolean | Promise<boolean>): XtermDisposable;
+  };
   open(host: HTMLElement): void;
   write(data: string | Uint8Array): void;
   loadAddon(addon: unknown): void;
@@ -74,6 +77,8 @@ interface Window {
     sidebarAtmosphereVars: () => string;
   };
   __shellCwd?: (value: string) => string;
-  __tmuxLaunchCommand?: (cwd: string, session: string) => string;
+  __tmuxLaunchCommand?: (cwd: string, session: string, command?:string, shellIntegration?:boolean) => string;
   __xtermAppearance?: (element: HTMLElement) => { fontSize: number; fontWeight:number; theme: XtermThemeColors };
+  __parseCompletionStatus?: (data: string) => number | null;
+  __reportCommandCompletion?: (event: { folderId:string; paneId:string; exitStatus:number; duration:number }) => void;
 }

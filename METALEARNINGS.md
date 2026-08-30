@@ -128,3 +128,10 @@ These rules apply to terminal workspaces and other single-file browser tools.
 42. Audit release copy against `/mnt/onetrust/ai-tells.md`. Use direct active
     sentences, remove em and en dashes, explain technical terms, and state the
     mechanism behind each conclusion.
+
+43. A PTY byte stream has no process lifecycle. Detect command completion with
+    shell-emitted semantic markers, not prompt matching or output-idle guesses.
+
+44. Separate completion attention from system notification policy. Record an
+    unread event first, then apply permission, visibility, focus, and privacy
+    checks before asking the operating system to notify.

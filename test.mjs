@@ -67,6 +67,15 @@ page.on('pageerror', (e) => errors.push(String(e)));
 
 await page.addInitScript(() => {
   window.__sawSkeleton = false;
+  window.__notifications = [];
+  window.__notificationPermissionRequests = 0;
+  class TestNotification {
+    static permission = 'default';
+    static requestPermission = async () => { window.__notificationPermissionRequests++; TestNotification.permission = 'granted'; return 'granted'; };
+    constructor(title, options = {}) { this.title = title; this.options = options; this.onclick = null; window.__notifications.push(this); }
+    close() { this.closed = true; }
+  }
+  Object.defineProperty(window, 'Notification', { value: TestNotification, configurable: true });
   new MutationObserver(() => {
     if (document.querySelector('.term.skeleton')) window.__sawSkeleton = true;
   }).observe(document, { childList: true, subtree: true });
@@ -83,9 +92,9 @@ await page.waitForSelector(LIVE_TERM, { timeout: 15000 });
 console.log('\nboot');
 ok('no console/page errors', errors.length === 0, errors.join(' | '));
 ok('hash route settled on a folder', /#\/f\//.test(page.url()), page.url());
-ok('release 1.1 is shown beneath the wordmark and exposed on the shell', await page.evaluate(() =>
-  document.querySelector('.brand-version')?.textContent === 'v1.1' &&
-  document.querySelector('.shell')?.getAttribute('data-version') === '1.1'));
+ok('release 1.2 is shown beneath the wordmark and exposed on the shell', await page.evaluate(() =>
+  document.querySelector('.brand-version')?.textContent === 'v1.2' &&
+  document.querySelector('.shell')?.getAttribute('data-version') === '1.2'));
 ok('fresh sidebar uses the compact 176px default', Math.abs((await page.locator('.rail').evaluate((el) => el.getBoundingClientRect().width)) - 176) < 1);
 
 const folderNames = await page.$$eval('.folder-name', (n) => n.map((e) => e.textContent));
@@ -176,6 +185,13 @@ ok('terminal cwd setup expands home shorthand before shell quoting',
 const tmuxCommand=await page.evaluate(()=>window.__tmuxLaunchCommand('"$HOME"', 'ttydterm-test'));
 ok('tmux launch enables mouse, disables status, and attaches after configuration',
   tmuxCommand.includes('mouse on') && tmuxCommand.includes('status off') && tmuxCommand.includes('unbind-key -n MouseDown3Pane') && tmuxCommand.includes('exec tmux attach-session'),tmuxCommand);
+const integratedTmuxCommand=await page.evaluate(()=>window.__tmuxLaunchCommand('"$HOME"','ttydterm-test','bash',true));
+ok('managed tmux sessions enable scoped OSC passthrough and Bash completion markers',
+  integratedTmuxCommand.includes('allow-passthrough on') && integratedTmuxCommand.includes('133;%s') &&
+  integratedTmuxCommand.includes('ttydterm-test.bashrc'),integratedTmuxCommand);
+ok('completion status parser accepts only bounded ttydterm finish markers',await page.evaluate(()=>
+  window.__parseCompletionStatus('D;0;ttydterm')===0 && window.__parseCompletionStatus('D;255;ttydterm')===255 &&
+  window.__parseCompletionStatus('D;256;ttydterm')===null && window.__parseCompletionStatus('D;0;other')===null));
 const links = await page.locator('.surface:not([hidden]) a.term-link').count();
 ok('terminal URLs render as clickable links', links >= 2, String(links));
 const lsCells = await page.locator('.surface:not([hidden]) .ls > span').count();
@@ -697,10 +713,11 @@ await page.locator('.rail-global[aria-label="Global settings"]').click();
 await page.waitForSelector('dialog[open] .global-settings');
 ok('global settings use their own hash route and the same dialog presentation as folder settings',
   /#\/settings$/.test(page.url()) && (await page.locator('dialog[open] .dlg.global-settings').count()) === 1);
-ok('global settings contain theme, font-size, and font-weight controls',
+ok('global settings contain theme, font, and command-notification controls',
   (await page.locator('dialog[open] .global-settings .theme-opt').count()) === 9 &&
   (await page.locator('dialog[open] .global-settings .font-groups button').count()) === 6 &&
-  (await page.locator('dialog[open] .global-settings .weight-groups button').count()) === 3);
+  (await page.locator('dialog[open] .global-settings .weight-groups button').count()) === 3 &&
+  (await page.locator('dialog[open] .global-settings input[type=checkbox]').count()) === 1);
 await page.screenshot({ path: `${SHOTS}/18-global-settings.png` });
 const fsBefore = await page.locator(LIVE_TERM).first().evaluate(e=>getComputedStyle(e).fontSize);
 await page.locator('dialog[open] .global-settings .font-groups button', {hasText:'16'}).click();
@@ -712,8 +729,51 @@ await page.locator('dialog[open] .global-settings .weight-groups button',{hasTex
 const fwAfter=await page.locator(LIVE_TERM).first().evaluate(e=>getComputedStyle(e).fontWeight);
 ok('font-weight buttons apply immediately',fwBefore!==fwAfter&&fwAfter==='600',`${fwBefore} -> ${fwAfter}`);
 await page.locator('dialog[open] .global-settings .weight-groups button',{hasText:'Regular'}).click();
+const notifyToggle=page.locator('dialog[open] .global-settings input[type=checkbox]');
+await notifyToggle.click();
+ok('enabling command notifications requests permission from the user gesture and then persists',await page.evaluate(()=>
+  window.__notificationPermissionRequests===1 && JSON.parse(localStorage.getItem('ttyd-workspace-v2')).ui.notifyOnCommandFinish===true));
 await page.locator('dialog[open] .global-settings button[aria-label="Close global settings"]').click();
 await page.waitForTimeout(80);
+
+console.log('\ncommand completion attention');
+await page.evaluate(()=>Object.defineProperty(document,'hasFocus',{configurable:true,value:()=>true}));
+const firstCompletion=await page.evaluate(()=>{
+  const config=JSON.parse(localStorage.getItem('ttyd-workspace-v2')),folder=config.folders[0];
+  const pane=folder.layout.type==='pane'?folder.layout:folder.layout.children[0];
+  window.__reportCommandCompletion({folderId:folder.id,paneId:pane.id,exitStatus:0,duration:1200});
+  return {folderId:folder.id,paneId:pane.id};
+});
+await page.waitForTimeout(40);
+ok('every completion marks its workspace even when a system notification is suppressed',
+  (await page.locator('.folder').first().locator('.folder-complete').count())===1 &&
+  await page.evaluate(()=>window.__notifications.length===0));
+ok('completion indicators expose their count in the workspace accessible name',
+  (await page.locator('.folder-main').first().getAttribute('aria-label')).includes('1 completed command'));
+await page.locator('.folder-main').first().click();
+ok('opening a workspace clears its completion indicator',(await page.locator('.folder').first().locator('.folder-complete').count())===0);
+await page.evaluate(({folderId,paneId})=>{
+  Object.defineProperty(document,'hasFocus',{configurable:true,value:()=>false});
+  window.__reportCommandCompletion({folderId,paneId,exitStatus:0,duration:1400});
+},firstCompletion);
+await page.waitForTimeout(40);
+ok('an unfocused browser notifies even when the completed workspace is active',await page.evaluate(()=>window.__notifications.length===1));
+await page.evaluate(()=>{window.__notifications[0].onclick();window.__notifications=[];Object.defineProperty(document,'hasFocus',{configurable:true,value:()=>true})});
+await page.locator('.folder-main').nth(1).click();
+await page.evaluate(({folderId,paneId})=>window.__reportCommandCompletion({folderId,paneId,exitStatus:0,duration:1800}),firstCompletion);
+await page.waitForTimeout(40);
+ok('an inactive workspace completion creates one privacy-safe system notification',await page.evaluate(()=>{
+  const notification=window.__notifications[0];
+  return window.__notifications.length===1 && notification.title==='Command finished' &&
+    notification.options.body==='Workspace “kalviumjr”' && !notification.options.body.includes('pi');
+}));
+ok('an inactive workspace displays its completion indicator',(await page.locator('.folder').first().locator('.folder-complete').count())===1);
+await page.evaluate(()=>window.__notifications[0].onclick());
+await page.waitForTimeout(40);
+ok('clicking the notification opens the workspace, clears its indicator, and closes the notification',
+  (await page.locator('.folder').first().getAttribute('class')).includes('active') &&
+  (await page.locator('.folder').first().locator('.folder-complete').count())===0 &&
+  await page.evaluate(()=>window.__notifications[0].closed===true));
 
 const rowRest = await boxOf(page, '.folder.active .folder-name');
 await page.locator('.folder.active').hover();
@@ -1356,9 +1416,12 @@ const savedConfig = {version:6,ui:{railWidth:176,railOpen:true,fontSize:13,fontW
 await saved.evaluate((config) => localStorage.setItem('ttyd-workspace-v2', JSON.stringify(config)), savedConfig);
 await saved.reload({ waitUntil: 'networkidle' });
 await saved.waitForSelector('.folder-name');
-ok('static hosting does not replace a saved real-workspace configuration',
+ok('static hosting migrates rather than replacing a saved real-workspace configuration',
   await saved.locator('.folder-name').textContent() === 'saved-real' &&
-  await saved.evaluate(() => JSON.parse(localStorage.getItem('ttyd-workspace-v2')).folders[0].id === 'saved-real'));
+  await saved.evaluate(() => {
+    const config=JSON.parse(localStorage.getItem('ttyd-workspace-v2'));
+    return config.version===7 && config.ui.notifyOnCommandFinish===false && config.folders[0].id==='saved-real';
+  }));
 await savedContext.close();
 await demoContext.close();
 
@@ -1378,6 +1441,22 @@ ok('probing to real ttyd changes renderer without violating React hook order',
   !transitionMessages.some((message) => /Rendered (fewer|more) hooks|order of Hooks/i.test(message)),
   transitionMessages.filter((message) => /hook/i.test(message)).join(' | '));
 await transitionContext.close();
+
+const deniedContext=await browser.newContext();
+await deniedContext.addInitScript(()=>{
+  class DeniedNotification { static permission='denied'; static requestPermission=async()=>{ throw new Error('must not prompt after denial') } }
+  Object.defineProperty(window,'Notification',{value:DeniedNotification,configurable:true});
+});
+const deniedPage=await deniedContext.newPage();
+await deniedPage.goto(BASE,{waitUntil:'networkidle'});
+await deniedPage.locator('.rail-global[aria-label="Global settings"]').click();
+await deniedPage.waitForSelector('dialog[open] .global-settings');
+ok('denied notification permission leaves the setting off, disabled, and explained',await deniedPage.evaluate(()=>{
+  const box=document.querySelector('.global-settings input[type=checkbox]');
+  return box?.disabled===true && box.checked===false && document.querySelector('.global-settings')?.textContent.includes('browser settings') &&
+    JSON.parse(localStorage.getItem('ttyd-workspace-v2')).ui.notifyOnCommandFinish===false;
+}));
+await deniedContext.close();
 
 console.log('\nreduced motion');
 const rmPage = await browser.newPage({ viewport: { width: 1200, height: 800 }, reducedMotion: 'reduce' });

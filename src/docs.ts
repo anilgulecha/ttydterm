@@ -124,6 +124,7 @@ const customizationsTop: DocSection = {
 const customizationsBottom: DocSection = {
   blocks: [
     { kind: 'para', spans: [em('Each pane has its own tmux setting.'), t(' Turn on '), em('Run in tmux'), t(' for a process that should survive a browser or ttyd disconnect.')] },
+    { kind: 'para', spans: [em('Completed Bash commands mark their workspace.'), t(' Global settings can also show a privacy-safe system notification when that workspace or browser window is inactive.')] },
   ],
 };
 
@@ -141,6 +142,8 @@ const security: DocSection = {
     { kind: 'para', spans: [code('-i 127.0.0.1'), t(' accepts connections from this computer only. If you bind ttyd to another interface, add TLS. Plain HTTP exposes Basic Auth credentials to anyone who can read the traffic.')] },
     { kind: 'heading', text: 'Use tmux for continuity' },
     { kind: 'para', spans: [t('tmux keeps a process alive across a browser or ttyd restart. It does not restrict the process, and a host reboot stops it.')] },
+    { kind: 'heading', text: 'Keep notifications private' },
+    { kind: 'para', spans: [t('Completion notifications name only the workspace because operating systems can show notification text on a lock screen. They require explicit browser permission, a secure origin, and an open ttydterm page.')] },
   ],
 };
 

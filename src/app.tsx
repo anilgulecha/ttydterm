@@ -134,7 +134,7 @@ const chromeVars = (t: Theme): React.CSSProperties => ({
 
 const STORE_KEY = 'ttyd-workspace-v2';
 const BG_KEY = 'ttyd-workspace-bg';
-const CONFIG_VERSION = 6;
+const CONFIG_VERSION = 7;
 const FONT_SIZES = [11, 12, 13, 14, 16, 18];
 const FONT_WEIGHTS: Array<{key:FontWeight;label:string;value:number}> = [{key:'regular',label:'Regular',value:400},{key:'semibold',label:'Semi bold',value:600},{key:'bold',label:'Bold',value:700}];
 const PATTERNS: PatternName[] = ['plain','dots','grid','diagonal','cross','waves','bricks'];
@@ -160,7 +160,7 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), h
 function defaultConfig(): Config {
   return {
     version: CONFIG_VERSION,
-    ui: { railWidth: RAIL_DEFAULT, railOpen: true, fontSize: 13, fontWeight:'regular' },
+    ui: { railWidth: RAIL_DEFAULT, railOpen: true, fontSize: 13, fontWeight:'regular', notifyOnCommandFinish:false },
     folders: [
       {
         id: 'f-jr', name: 'kalviumjr', cwd: '~/work/kalviumjr', icon: 'code', pattern: 'dots' as const, theme:'night',
@@ -234,6 +234,7 @@ function validateConfig(raw: unknown): ValidationResult {
       railOpen: rawUi.railOpen === undefined ? true : !!rawUi.railOpen,
       fontSize: FONT_SIZES.includes(Number(rawUi.fontSize)) ? Number(rawUi.fontSize) : 13,
       fontWeight: FONT_WEIGHTS.some(({key})=>key===rawUi.fontWeight) ? rawUi.fontWeight as FontWeight : 'regular',
+      notifyOnCommandFinish: rawUi.notifyOnCommandFinish === true,
     };
     return { ok: true, config: { version: CONFIG_VERSION, ui, folders } };
   } catch (e) { return { ok: false, error: e instanceof Error ? e.message : String(e) }; }
@@ -448,7 +449,7 @@ const docLayout = (page: DocPage): LayoutNode => {
 
 const documentationConfig = (): Config => ({
   version: CONFIG_VERSION,
-  ui: { railWidth: RAIL_DEFAULT, railOpen: true, fontSize: 13, fontWeight: 'regular' },
+  ui: { railWidth: RAIL_DEFAULT, railOpen: true, fontSize: 13, fontWeight: 'regular', notifyOnCommandFinish:false },
   folders: DOC_PAGES.map((page) => ({
     id: 'doc-' + page.id, name: page.name, cwd: '~/' + page.id, doc: page.id,
     icon: WS_ICONS[page.icon] ? page.icon : null, pattern: page.pattern, theme: page.theme,
@@ -486,12 +487,22 @@ window.__xtermAppearance=xtermAppearance;
 
 interface TerminalClient { term: XtermTerminal; fit: XtermFitAddon; socket: WebSocket }
 type ConnectionState = 'connecting' | 'starting' | 'ready' | 'disconnected' | 'error';
+interface CommandCompletion { folderId:string; paneId:string; exitStatus:number; duration:number }
 
-function RealTerminal({ folder, pane, runtime, suspended }: {
+const parseCompletionStatus = (data: string): number | null => {
+  const match = /^D;(\d{1,3});ttydterm$/.exec(data);
+  if (!match) return null;
+  const status = Number(match[1]);
+  return status >= 0 && status <= 255 ? status : null;
+};
+window.__parseCompletionStatus=parseCompletionStatus;
+
+function RealTerminal({ folder, pane, runtime, suspended, onCommandComplete }: {
   folder: Folder;
   pane: PaneNode;
   runtime: Runtime;
   suspended: boolean;
+  onCommandComplete: (event:CommandCompletion) => void;
 }) {
   const host = useRef<HTMLDivElement | null>(null), client = useRef<TerminalClient | null>(null);
   const [state,setState]=useState<ConnectionState>('connecting');
@@ -503,12 +514,20 @@ function RealTerminal({ folder, pane, runtime, suspended }: {
     const term = new globalThis.Terminal({cursorBlink:false,allowTransparency:true,scrollback:pane.persist?0:1000,fontSize:appearance.fontSize,fontWeight:appearance.fontWeight,fontFamily:'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace',convertEol:true,theme:appearance.theme});
     const fit = new globalThis.FitAddon.FitAddon(); term.loadAddon(fit);
     if(globalThis.WebLinksAddon) term.loadAddon(new globalThis.WebLinksAddon.WebLinksAddon());
+    let commandStartedAt:number|null=null;
+    const shellEvents=term.parser.registerOscHandler(133,(data)=>{
+      if(data==='C;ttydterm'){commandStartedAt=Date.now();return true}
+      const exitStatus=parseCompletionStatus(data);
+      if(exitStatus===null||commandStartedAt===null)return false;
+      const duration=Math.max(0,Date.now()-commandStartedAt);commandStartedAt=null;
+      onCommandComplete({folderId:folder.id,paneId:pane.id,exitStatus,duration});return true;
+    });
     term.open(hostEl);fit.fit();
     const encoder=new TextEncoder(),decoder=new TextDecoder();
     const socket=new WebSocket(runtime.endpoints.ws,['tty']);socket.binaryType='arraybuffer';let initialized=false;
     const sendInput=(data: string)=>{if(socket.readyState!==1)return;const bytes=encoder.encode(data),payload=new Uint8Array(bytes.length+1);payload[0]=48;payload.set(bytes,1);socket.send(payload)};
     socket.onopen=()=>{socket.send(encoder.encode(JSON.stringify({AuthToken:runtime.token,columns:term.cols,rows:term.rows})));setState('starting')};
-    socket.onmessage=(event: MessageEvent<ArrayBuffer>)=>{const bytes=new Uint8Array(event.data),command=String.fromCharCode(bytes[0]),data=bytes.slice(1);if(command==='0'){term.write(data);if(!initialized){initialized=true;const launch=paneLaunchCommand({cwd:folder.cwd,command:pane.command,persist:pane.persist,folderLabel:folderLabel(folder),paneId:pane.id});sendInput(`${launch}\r`);setState('ready')}}else if(command==='1')document.title=decoder.decode(data)+' · ttydterm'};
+    socket.onmessage=(event: MessageEvent<ArrayBuffer>)=>{const bytes=new Uint8Array(event.data),command=String.fromCharCode(bytes[0]),data=bytes.slice(1);if(command==='0'){term.write(data);if(!initialized){initialized=true;const launch=paneLaunchCommand({cwd:folder.cwd,command:pane.command,persist:pane.persist,folderLabel:folderLabel(folder),paneId:pane.id,shellIntegration:true});sendInput(`${launch}\r`);setState('ready')}}else if(command==='1')document.title=decoder.decode(data)+' · ttydterm'};
     socket.onclose=()=>setState('disconnected');socket.onerror=()=>setState('error');
     const input=term.onData(sendInput),resize=term.onResize(({cols,rows})=>socket.readyState===1&&socket.send(encoder.encode('1'+JSON.stringify({columns:cols,rows}))));
     let toastTimer:ReturnType<typeof setTimeout>;
@@ -522,8 +541,8 @@ function RealTerminal({ folder, pane, runtime, suspended }: {
     term.attachCustomKeyEventHandler((event:KeyboardEvent)=>{if((event.ctrlKey||event.metaKey)&&event.shiftKey&&event.key.toLowerCase()==='v'&&event.type==='keydown'){void readClipboard();return false}return true});
     const selection=term.onSelectionChange(async()=>{const text=term.getSelection();if(!text)return;try{await navigator.clipboard.writeText(text);showToast('Copied')}catch{}});
     const ro=new ResizeObserver(()=>{try{fit.fit()}catch{}});ro.observe(hostEl);client.current={term,fit,socket};
-    return()=>{clearTimeout(toastTimer);hostEl.removeEventListener('paste',nativePaste);hostEl.removeEventListener('ttydterm-paste',menuPaste);hostEl.removeEventListener('ttydterm-focus',focusTerminal);ro.disconnect();input.dispose();resize.dispose();selection.dispose();socket.close(1000);term.dispose();client.current=null};
-  },[folder.cwd,pane.id,pane.command,pane.persist,runtime.mode,runtime.mode==='ttyd'?runtime.token:null]);
+    return()=>{clearTimeout(toastTimer);hostEl.removeEventListener('paste',nativePaste);hostEl.removeEventListener('ttydterm-paste',menuPaste);hostEl.removeEventListener('ttydterm-focus',focusTerminal);ro.disconnect();input.dispose();resize.dispose();selection.dispose();shellEvents.dispose();socket.close(1000);term.dispose();client.current=null};
+  },[folder.cwd,folder.id,pane.id,pane.command,pane.persist,runtime.mode,runtime.mode==='ttyd'?runtime.token:null,onCommandComplete]);
 
   useLayoutEffect(()=>{
     if(!host.current||!client.current)return;
@@ -677,17 +696,18 @@ function MockTerminal({ folder, pane, suspended }: {
   );
 }
 
-function Terminal({ folder, pane, runtime, suspended }: {
+function Terminal({ folder, pane, runtime, suspended, onCommandComplete }: {
   folder: Folder;
   pane: PaneNode;
   runtime: Runtime;
   suspended: boolean;
+  onCommandComplete: (event:CommandCompletion) => void;
 }) {
   const page = folder.doc ? docPage(folder.doc) : null;
   const section = page ? page.sections[pane.docSection ?? 0] : null;
 
   if (page && section) return <DocTerminal folder={folder} page={page} section={section} />;
-  if (!folder.doc && runtime.mode === 'ttyd') return <RealTerminal folder={folder} pane={pane} runtime={runtime} suspended={suspended}/>;
+  if (!folder.doc && runtime.mode === 'ttyd') return <RealTerminal folder={folder} pane={pane} runtime={runtime} suspended={suspended} onCommandComplete={onCommandComplete}/>;
   return <MockTerminal folder={folder} pane={pane} suspended={suspended}/>;
 }
 
@@ -805,7 +825,7 @@ type PaneMenu = { source: 'trigger' | 'context'; x: number; y: number };
 interface FocusRequest { id: string; n?: number; nonce?: number }
 
 function Pane({ node, folder, runtime, focused, closing, focusReq, resizing,
-               onFocus, onSplit, onClose, canClose, onOpenSettings }: {
+               onFocus, onSplit, onClose, canClose, onOpenSettings, onCommandComplete }: {
   node: PaneNode;
   folder: Folder;
   runtime: Runtime;
@@ -818,6 +838,7 @@ function Pane({ node, folder, runtime, focused, closing, focusReq, resizing,
   onClose: (paneId: string) => void;
   canClose: boolean;
   onOpenSettings: (paneId: string) => void;
+  onCommandComplete: (event:CommandCompletion) => void;
 }) {
   const [menu, setMenu] = useState<PaneMenu | null>(null);
   const ref = useRef<HTMLDivElement | null>(null);
@@ -859,7 +880,7 @@ function Pane({ node, folder, runtime, focused, closing, focusReq, resizing,
         setMenu({ source:'context', x:e.clientX-r.left, y:e.clientY-r.top });
       }}
     >
-      <Terminal folder={folder} pane={node} runtime={runtime} suspended={resizing} />
+      <Terminal folder={folder} pane={node} runtime={runtime} suspended={resizing} onCommandComplete={onCommandComplete} />
 
       {}
       <div className="pane-edge" aria-hidden="true" />
@@ -924,11 +945,12 @@ interface NodeProps {
   canClose: boolean;
   onResize: (path: number[], sizes: number[]) => void;
   onOpenSettings: (paneId: string) => void;
+  onCommandComplete: (event:CommandCompletion) => void;
   path: number[];
 }
 
 function Node({ node, folder, runtime, focusId, closingId, focusReq, resizing, onResizeStart, onResizeEnd,
-               onFocus, onSplit, onClose, canClose, onResize, onOpenSettings, path }: NodeProps) {
+               onFocus, onSplit, onClose, canClose, onResize, onOpenSettings, onCommandComplete, path }: NodeProps) {
   const ref = useRef<HTMLDivElement | null>(null);
 
   if (node.type === 'pane') {
@@ -937,7 +959,7 @@ function Node({ node, folder, runtime, focusId, closingId, focusReq, resizing, o
       <Pane node={leaf} folder={folder} runtime={runtime} focused={focusId === leaf.id} closing={closingId === leaf.id}
             focusReq={focusReq} resizing={resizing}
             onFocus={() => onFocus(leaf.id)} onSplit={onSplit} onClose={onClose} canClose={canClose}
-            onOpenSettings={onOpenSettings} />
+            onOpenSettings={onOpenSettings} onCommandComplete={onCommandComplete} />
     );
   }
 
@@ -1019,7 +1041,7 @@ function Node({ node, folder, runtime, focusId, closingId, focusReq, resizing, o
             <Node node={child} folder={folder} runtime={runtime} focusId={focusId} closingId={closingId} focusReq={focusReq}
                   resizing={resizing} onResizeStart={onResizeStart} onResizeEnd={onResizeEnd}
                   onFocus={onFocus} onSplit={onSplit} onClose={onClose} canClose={canClose}
-                  onResize={onResize} onOpenSettings={onOpenSettings} path={path.concat(i)} />
+                  onResize={onResize} onOpenSettings={onOpenSettings} onCommandComplete={onCommandComplete} path={path.concat(i)} />
           </div>
         </React.Fragment>
       ))}
@@ -1028,7 +1050,7 @@ function Node({ node, folder, runtime, focusId, closingId, focusReq, resizing, o
 }
 
 function Surface({ folder, runtime, active, focusId, closingId, focusReq, appResizing,
-                   onFocus, onSplit, onClose, onResize, onAddFirst, onOpenSettings }: {
+                   onFocus, onSplit, onClose, onResize, onAddFirst, onOpenSettings, onCommandComplete }: {
   folder: Folder;
   runtime: Runtime;
   active: boolean;
@@ -1042,6 +1064,7 @@ function Surface({ folder, runtime, active, focusId, closingId, focusReq, appRes
   onResize: (path: number[], sizes: number[]) => void;
   onAddFirst: () => void;
   onOpenSettings: (paneId: string) => void;
+  onCommandComplete: (event:CommandCompletion) => void;
 }) {
   const viewport = useRef<HTMLDivElement | null>(null);
   const [box, setBox] = useState({ w: 0, h: 0 });
@@ -1073,7 +1096,7 @@ function Surface({ folder, runtime, active, focusId, closingId, focusReq, appRes
                   resizing={resizing || appResizing}
                   onResizeStart={() => setResizing(true)} onResizeEnd={() => setResizing(false)}
                   onFocus={onFocus} onSplit={onSplit} onClose={onClose} canClose={canClose}
-                  onResize={onResize} onOpenSettings={onOpenSettings} path={[]} />
+                  onResize={onResize} onOpenSettings={onOpenSettings} onCommandComplete={onCommandComplete} path={[]} />
           </div>
         ) : (
           <div className="empty-add">
@@ -1293,13 +1316,21 @@ function FirstRunDialog({ capabilities, onProbe, onCreate }: {
   );
 }
 
-function GlobalSettings({ theme, fontSize, fontWeight, onTheme, onFontSize, onFontWeight, onClose }: {
+type NotificationPermissionState = NotificationPermission | 'unsupported';
+const notificationPermission = ():NotificationPermissionState =>
+  typeof Notification === 'undefined' || !isSecureContext ? 'unsupported' : Notification.permission;
+
+function GlobalSettings({ theme, fontSize, fontWeight, notifyOnCommandFinish, notificationState,
+                          onTheme, onFontSize, onFontWeight, onNotifications, onClose }: {
   theme: string;
   fontSize: number;
   fontWeight: FontWeight;
+  notifyOnCommandFinish:boolean;
+  notificationState:NotificationPermissionState;
   onTheme: (theme: string) => void;
   onFontSize: (size: number) => void;
   onFontWeight: (weight:FontWeight) => void;
+  onNotifications:(enabled:boolean)=>void;
   onClose: () => void;
 }) {
   return (
@@ -1321,6 +1352,16 @@ function GlobalSettings({ theme, fontSize, fontWeight, onTheme, onFontSize, onFo
       <FieldGroup label="Terminal font weight">
         {(labelledBy)=><div className="weight-groups" role="radiogroup" aria-labelledby={labelledBy}>{FONT_WEIGHTS.map(({key,label,value})=><button key={key} type="button" role="radio" aria-checked={fontWeight===key} className={fontWeight===key?'on':''} style={{fontWeight:value}} onClick={()=>onFontWeight(key)}>{label}</button>)}</div>}
       </FieldGroup>
+      <CheckboxField
+        label="Notify when commands finish"
+        checked={notifyOnCommandFinish}
+        disabled={notificationState==='unsupported'||notificationState==='denied'}
+        onChange={onNotifications}
+        hint={notificationState==='unsupported' ? 'System notifications need browser support and a secure origin such as localhost or HTTPS.'
+             : notificationState==='denied' ? 'Notifications are blocked. Allow them in this site’s browser settings.'
+             : 'Notifies only when the workspace is inactive or this browser tab or window is not focused.'}
+        hintTone={notificationState==='unsupported'||notificationState==='denied'?'warn':'default'}
+      />
     </ModalForm>
   );
 }
@@ -1489,6 +1530,8 @@ function App() {
   const [confirmCloseId, setConfirmCloseId] = useState<string | null>(null);
   const [appResizing, setAppResizing] = useState(false);
   const [lastPaneByFolder,setLastPaneByFolder]=useState<Record<string,string>>({});
+  const [completedByFolder,setCompletedByFolder]=useState<Record<string,number>>({});
+  const [notificationState,setNotificationState]=useState<NotificationPermissionState>(notificationPermission);
   const paletteInputRef=useRef<HTMLInputElement|null>(null);
   const route = useRoute();
   const tmux = useTmux();
@@ -1514,6 +1557,8 @@ function App() {
 
   if(!active) throw new Error('Configuration has no folders');
   const activeTheme = THEMES[active.theme] || THEMES.paper;
+  const configRef=useRef(config),activeIdRef=useRef(active.id);
+  configRef.current=config;activeIdRef.current=active.id;
   useEffect(() => { document.documentElement.style.colorScheme = activeTheme.appearance; }, [activeTheme.appearance]);
   useEffect(() => {
     try { localStorage.setItem(BG_KEY, String(chromeVars(activeTheme)['--stage-bg'])); } catch {}
@@ -1526,10 +1571,35 @@ function App() {
     if (active && routedId !== active.id) history.replaceState(null, '', '#/f/' + encodeURIComponent(active.id));
   }, [active, routedId, ownsUrl]);
 
+  const clearCompleted=useCallback((folderId:string)=>setCompletedByFolder((current)=>{
+    if(!current[folderId])return current;const next={...current};delete next[folderId];return next;
+  }),[]);
   const focusFolderPane=useCallback((folder:Folder)=>{
     const panes=listPanes(folder.layout);const id=lastPaneByFolder[folder.id]&&panes.some(p=>p.id===lastPaneByFolder[folder.id])?lastPaneByFolder[folder.id]:panes[0]?.id;
-    go('f',folder.id);if(id){setFocusId(id);setFocusReq({id,n:Date.now()})}
-  },[lastPaneByFolder]);
+    clearCompleted(folder.id);go('f',folder.id);if(id){setFocusId(id);setFocusReq({id,n:Date.now()})}
+  },[clearCompleted,lastPaneByFolder]);
+  const onCommandComplete=useCallback((event:CommandCompletion)=>{
+    setCompletedByFolder((current)=>({...current,[event.folderId]:Math.min(99,(current[event.folderId]||0)+1)}));
+    const needsAttention=event.folderId!==activeIdRef.current||document.visibilityState!=='visible'||!document.hasFocus();
+    if(!needsAttention||!configRef.current.ui.notifyOnCommandFinish||typeof Notification==='undefined'||Notification.permission!=='granted')return;
+    const folder=configRef.current.folders.find((item)=>item.id===event.folderId);if(!folder)return;
+    try{
+      const notification=new Notification('Command finished',{body:'Workspace “'+folderLabel(folder)+'”',tag:'ttydterm-'+event.paneId});
+      notification.onclick=()=>{window.focus();clearCompleted(event.folderId);go('f',event.folderId);setFocusId(event.paneId);setLastPaneByFolder((current)=>({...current,[event.folderId]:event.paneId}));setFocusReq({id:event.paneId,n:Date.now()});notification.close()};
+    }catch{}
+  },[clearCompleted]);
+  window.__reportCommandCompletion=onCommandComplete;
+  const setCommandNotifications=useCallback(async(enabled:boolean)=>{
+    if(!enabled){setUi({notifyOnCommandFinish:false});return}
+    let permission=notificationPermission();
+    if(permission==='default')try{permission=await Notification.requestPermission()}catch{permission='default'}
+    setNotificationState(permission);
+    setUi({notifyOnCommandFinish:permission==='granted'});
+  },[setUi]);
+  useEffect(()=>{
+    const refresh=()=>{const permission=notificationPermission();setNotificationState(permission);if(permission==='denied'||permission==='unsupported')setUi({notifyOnCommandFinish:false})};
+    refresh();addEventListener('focus',refresh);document.addEventListener('visibilitychange',refresh);return()=>{removeEventListener('focus',refresh);document.removeEventListener('visibilitychange',refresh)};
+  },[setUi]);
 
   useEffect(() => {
     const paneIds:string[]=[];const collect=(n:LayoutNode|null|undefined):void=>{if(!n)return;if(n.type==='pane')paneIds.push(n.id);else n.children.forEach(collect)};collect(active?.layout);
@@ -1660,13 +1730,14 @@ function App() {
   }, [active, patchFolder]);
 
   const onPalettePick = (row: PaletteRow) => {
+    clearCompleted(row.folder.id);
     if(row.kind==='pane'&&row.pane){go('f',row.folder.id);setFocusId(row.pane.id);setLastPaneByFolder(v=>({...v,[row.folder.id]:row.pane!.id}));setFocusReq({id:row.pane.id,n:Date.now()})}
     else focusFolderPane(row.folder);
   };
 
 
   const FolderRow = ({ f, compact, index }: {f:Folder;compact:boolean;index:number}) => {
-    const label = folderLabel(f);
+    const label = folderLabel(f),completed=completedByFolder[f.id]||0;
     const [open,setOpen]=useState(false);
     useEffect(()=>{if(!open)return;const close=()=>setOpen(false);addEventListener('pointerdown',close);return()=>removeEventListener('pointerdown',close)},[open]);
     return (
@@ -1675,13 +1746,14 @@ function App() {
         <button type="button" className="folder-main"
                 aria-current={f.id === active.id ? 'true' : undefined}
                 aria-keyshortcuts={index<9?'Alt+'+(index+1):undefined}
-                aria-label={(compact?label:'Workspace '+label)+(index<9?', Alt+'+(index+1):'')}
+                aria-label={(compact?label:'Workspace '+label)+(completed?', '+completed+' completed command'+(completed===1?'':'s'):'')+(index<9?', Alt+'+(index+1):'')}
                 onClick={() => focusFolderPane(f)}
                 onDoubleClick={() => go('f', f.id, 'settings')}>
           <span className="folder-badge">
             {f.icon ? <WsIcon name={f.icon} /> : initials(label)}
           </span>
           {compact ? null : <span className="folder-name">{label}</span>}
+          {completed ? <span className="folder-complete" aria-hidden="true" /> : null}
         </button>
         {compact ? null : (
 
@@ -1756,7 +1828,7 @@ function App() {
                    closingId={closingId} focusReq={focusReq}
                    onFocus={(id)=>{setFocusId(id);setLastPaneByFolder(v=>({...v,[f.id]:id}))}} onSplit={onSplit} onClose={onClose} onResize={onResize}
                    onAddFirst={addFirstPane}
-                   onOpenSettings={(id) => go('f', f.id, 'pane', id)} />
+                   onOpenSettings={(id) => go('f', f.id, 'pane', id)} onCommandComplete={onCommandComplete} />
         ))}
       </main>
 
@@ -1784,14 +1856,15 @@ function App() {
           }}
           onCreate={(cwd, name, persist) => {
             const folder: Folder = { id: uid('f-'), name, cwd, icon: 'terminal', pattern: 'dots', theme: 'paper', layout: pane('exec bash -l', persist) };
-            setConfig({ version: CONFIG_VERSION, ui: { railWidth: RAIL_DEFAULT, railOpen: true, fontSize: 13, fontWeight:'regular' }, folders: [folder] });
+            setConfig({ version: CONFIG_VERSION, ui: { railWidth: RAIL_DEFAULT, railOpen: true, fontSize: 13, fontWeight:'regular', notifyOnCommandFinish:false }, folders: [folder] });
             setConfigured(true);
             go('f', folder.id);
           }} />
       </ModalShell>
 
       <ModalShell open={showGlobalSettings} onClose={closeDialog}>
-        <GlobalSettings theme={active.theme} fontSize={ui.fontSize} fontWeight={ui.fontWeight} onClose={closeDialog}
+        <GlobalSettings theme={active.theme} fontSize={ui.fontSize} fontWeight={ui.fontWeight}
+          notifyOnCommandFinish={ui.notifyOnCommandFinish} notificationState={notificationState} onNotifications={setCommandNotifications} onClose={closeDialog}
           onTheme={(theme) => patchFolder(active.id, (f) => ({ ...f, theme }))} onFontSize={(fontSize) => setUi({ fontSize })} onFontWeight={(fontWeight)=>setUi({fontWeight})} />
       </ModalShell>
 

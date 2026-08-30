@@ -1,6 +1,6 @@
 # ttydterm
 
-**Current version: 1.1.** The sidebar shows the same version below the
+**Current version: 1.2.** The sidebar shows the same version below the
 `ttydterm` name.
 
 ttydterm adds workspaces, split panes, themes, and tmux support to vanilla ttyd.
@@ -120,6 +120,22 @@ Pane commands and restored configurations contain executable shell input.
 Review a backup before you restore it. tmux keeps a process alive after a browser
 or ttyd disconnect. A host reboot or stopped tmux session ends that process.
 
+## Command completion
+
+Each completed Bash command marks its workspace in the sidebar until that
+workspace is opened. Enable **Notify when commands finish** in global settings
+to also show a system notification when the workspace is inactive or the page
+is hidden or unfocused. Enabling the setting asks for browser permission. The
+notification names only the workspace and does not expose command text or
+terminal output on the lock screen.
+
+Completion tracking uses OSC 133 markers installed in ttydterm-managed Bash
+shells. ttydterm enables passthrough only on the tmux sessions it manages; it
+does not change the user's global tmux configuration. Programs inside SSH,
+nested shells, or full-screen applications need their own compatible shell
+integration. Notifications require the page to remain open and require browser
+support on a secure origin such as localhost or HTTPS.
+
 ## Interface rules
 
 The main view shows text only in terminals, the product name and version, and
@@ -140,12 +156,13 @@ The interface follows these layout rules:
 
 ```jsonc
 {
-  "version": 6,
+  "version": 7,
   "ui": {
     "railWidth": 176,
     "railOpen": true,
     "fontSize": 13,
-    "fontWeight": "regular"
+    "fontWeight": "regular",
+    "notifyOnCommandFinish": false
   },
   "folders": [{
     "id": "f-jr",
@@ -250,6 +267,7 @@ The browser suite covers:
 - static documentation order, copy, layout, and non-persistence
 - monospace documentation output and keyboard scrolling
 - secure launch-command flags and password handling
+- OSC command-completion parsing, workspace indicators, and notification policy
 - real ttyd probing without React hook-order changes
 - reduced motion
 

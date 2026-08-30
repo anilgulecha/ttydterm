@@ -83,9 +83,11 @@ await page.addInitScript(() => {
 
 console.log('\nttyd-workspace smoke test');
 ok('tracked files contain no hard copy tells', copyTellHits.length === 0, copyTellHits.join(' | '));
+const productScreenshot = readFileSync('docs/ttydterm.png');
 ok('GitHub README links the shipped product screenshot',
   readFileSync('README.md','utf8').includes('![ttydterm showing a README workspace with three terminal panes](docs/ttydterm.png)') &&
-  existsSync('docs/ttydterm.png') && statSync('docs/ttydterm.png').size > 10000);
+  existsSync('docs/ttydterm.png') && statSync('docs/ttydterm.png').size > 10000 &&
+  productScreenshot.readUInt32BE(16) === 1440 && productScreenshot.readUInt32BE(20) === 760);
 
 await page.goto(BASE, { waitUntil: 'networkidle' });
 await page.evaluate(() => localStorage.clear());
@@ -94,6 +96,15 @@ await page.waitForSelector(LIVE_TERM, { timeout: 15000 });
 
 console.log('\nboot');
 ok('no console/page errors', errors.length === 0, errors.join(' | '));
+ok('social previews use the published product screenshot', await page.evaluate(() => {
+  const content=(selector)=>document.querySelector(selector)?.getAttribute('content');
+  return document.querySelector('link[rel="canonical"]')?.getAttribute('href')==='https://www.gulecha.org/ttydterm/' &&
+    content('meta[property="og:image"]')==='https://www.gulecha.org/ttydterm/docs/ttydterm.png' &&
+    content('meta[property="og:image:width"]')==='1440' && content('meta[property="og:image:height"]')==='760' &&
+    content('meta[property="og:image:alt"]')==='ttydterm showing a README workspace with three terminal panes' &&
+    content('meta[name="twitter:card"]')==='summary_large_image' &&
+    content('meta[name="twitter:image"]')==='https://www.gulecha.org/ttydterm/docs/ttydterm.png';
+}));
 ok('hash route settled on a folder', /#\/f\//.test(page.url()), page.url());
 ok('release 1.2 is shown beneath the wordmark and exposed on the shell', await page.evaluate(() =>
   document.querySelector('.brand-version')?.textContent === 'v1.2' &&

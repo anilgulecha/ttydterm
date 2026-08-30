@@ -147,3 +147,7 @@ These rules apply to terminal workspaces and other single-file browser tools.
 47. Make simulated terminal commands agree with the content in each pane. When
     split documentation represents separate files, unique filenames preserve
     the terminal metaphor and make the layout understandable at a glance.
+
+48. Social preview metadata needs absolute public image URLs, explicit image
+    dimensions, and useful alt text. Assert the metadata and the source image
+    dimensions together so a replaced screenshot cannot silently break cards.

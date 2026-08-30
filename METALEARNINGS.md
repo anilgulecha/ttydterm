@@ -143,3 +143,7 @@ These rules apply to terminal workspaces and other single-file browser tools.
 46. Capture release screenshots from the generated artifact, then inspect the
     final crop. Test fixtures can be correct while the image still truncates a
     label or gives empty space too much weight.
+
+47. Make simulated terminal commands agree with the content in each pane. When
+    split documentation represents separate files, unique filenames preserve
+    the terminal metaphor and make the layout understandable at a glance.

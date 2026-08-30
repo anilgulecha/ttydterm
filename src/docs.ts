@@ -26,6 +26,7 @@ export type DocBlock =
   | { kind: 'themes' };
 
 export interface DocSection {
+  fileName: string;
   blocks: DocBlock[];
 }
 
@@ -49,6 +50,7 @@ export const README_LEAD =
   'A terminal in your browser, with unix tools (ttyd, tmux) that you love and trust.';
 
 const readmeMain: DocSection = {
+  fileName: 'readme.md',
   blocks: [
     { kind: 'lead', spans: [em(README_LEAD)] },
     { kind: 'para', spans: [t('ttydterm adds workspaces, split panes, themes, tmux continuity, and command completion alerts to vanilla ttyd.')] },
@@ -63,6 +65,7 @@ const readmeMain: DocSection = {
 };
 
 const readmeFeatures: DocSection = {
+  fileName: 'features.md',
   blocks: [
     { kind: 'heading', text: 'Features' },
     { kind: 'list', items: [
@@ -81,6 +84,7 @@ const readmeFeatures: DocSection = {
 };
 
 const readmeKeyboard: DocSection = {
+  fileName: 'keyboard.md',
   blocks: [
     { kind: 'heading', text: 'Keyboard' },
     { kind: 'defs', items: [
@@ -97,6 +101,7 @@ const readmeKeyboard: DocSection = {
 };
 
 const usingIt: DocSection = {
+  fileName: 'using-it.md',
   blocks: [
     { kind: 'lead', spans: [em('Install ttyd and tmux, save this file in your home directory, and start ttydterm when you need it.')] },
     { kind: 'heading', text: '1. Install ttyd and tmux' },
@@ -117,6 +122,7 @@ const usingIt: DocSection = {
 };
 
 const themes: DocSection = {
+  fileName: 'themes.md',
   blocks: [
     { kind: 'lead', spans: [em('Each workspace keeps its own theme.')] },
     { kind: 'para', spans: [t('Choose a theme below. The app repaints this workspace at once. Other workspaces keep their current themes.')] },
@@ -128,6 +134,7 @@ const themes: DocSection = {
 };
 
 const security: DocSection = {
+  fileName: 'security.md',
   blocks: [
     { kind: 'lead', spans: [em('A writable browser terminal can run every command that your shell account can run. Review each launch flag before you start it.')] },
     { kind: 'command', command: ttydLaunchCommand() },

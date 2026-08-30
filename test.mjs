@@ -1250,6 +1250,14 @@ ok('README demonstrates one left pane plus a stacked right pair',
     const widths=slots.map((node)=>node.getBoundingClientRect().width),heights=rows.map((node)=>node.getBoundingClientRect().height);
     return slots.length===2&&rows.length===2&&Math.abs(widths[0]-widths[1])<=2&&Math.abs(heights[0]-heights[1])<=2;
   }));
+const readmeCommands=await readmePanes.evaluateAll((panes)=>panes.map((pane)=>
+  pane.querySelector('.term-body > .term-row')?.textContent?.trim()));
+ok('each README pane cats its own named file',
+  readmeCommands.join('|') === [
+    'visitor@ttydterm:~/readme$ cat readme.md',
+    'visitor@ttydterm:~/readme$ cat features.md',
+    'visitor@ttydterm:~/readme$ cat keyboard.md',
+  ].join('|'),readmeCommands.join('|'));
 const lead = await demo.locator('.surface:not([hidden]) .doc-lead').textContent();
 ok('README opens with the approved tagline', lead ===
   'A terminal in your browser, with unix tools (ttyd, tmux) that you love and trust.', lead);

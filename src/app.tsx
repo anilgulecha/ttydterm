@@ -434,7 +434,7 @@ function mockTerminal({ folder, pane }: { folder: Folder; pane: PaneNode }): Moc
 }
 
 const docPane = (page: DocPage, section: number): PaneNode =>
-  ({ type:'pane', id:'doc-' + page.id + '-' + section, command:'cat ' + page.id + '.txt', persist:false, docSection:section });
+  ({ type:'pane', id:'doc-' + page.id + '-' + section, command:'cat ' + page.sections[section].fileName, persist:false, docSection:section });
 
 const docLayout = (page: DocPage): LayoutNode => {
   if (page.layout === 'demo-split') {
@@ -615,7 +615,7 @@ function DocTerminal({ folder, page, section }: { folder: Folder; page: DocPage;
           <span style={{ color: colorOf('dim') }}>:</span>
           <span style={{ color: colorOf('blue') }}>~/{page.id}</span>
           <span style={{ color: colorOf('dim') }}>$ </span>
-          <span style={{ color: colorOf('fg') }}>cat {page.id}.txt</span>
+          <span style={{ color: colorOf('fg') }}>cat {section.fileName}</span>
         </span>
         <div className="doc-body">
           {first ? <h2 className="doc-title">{page.title}</h2> : null}

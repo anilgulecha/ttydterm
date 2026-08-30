@@ -25,7 +25,7 @@ export const ttydLaunchCommand = (): string =>
   `-I ${TTYD_INDEX} -t cursorBlink=false bash -l`;
 
 export const ttydDownloadCommand = (): string =>
-  'curl -fL https://raw.githubusercontent.com/anilgulecha/ttydterm/main/index.html -o "$HOME/ttydterm.html"';
+  'curl -fL https://www.gulecha.org/ttydterm/index.html -o "$HOME/ttydterm.html"';
 
 export const shellCwd = (value: string): string => {
   const path = String(value || '~').trim();

@@ -1215,7 +1215,7 @@ await demo.locator('.folder', { hasText: 'Using it' }).click();
 const usingText = await demo.locator('.surface:not([hidden]) .doc-body').textContent();
 ok('Using it includes four scoped package managers, download, localhost auth and tmux limits',
   ['brew install ttyd tmux','sudo apt install ttyd tmux','sudo dnf install ttyd tmux','sudo pacman -S ttyd tmux',
-   'curl -fL https://raw.githubusercontent.com/anilgulecha/ttydterm/main/index.html','http://localhost:7681',
+   'curl -fL https://www.gulecha.org/ttydterm/index.html','http://localhost:7681',
    'Replace user:password with credentials you choose','while the tmux server and session run'].every((text) => usingText.includes(text)));
 
 await demo.locator('.folder', { hasText: 'Keyboard' }).click();

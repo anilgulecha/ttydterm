@@ -78,7 +78,7 @@ sudo pacman -S ttyd tmux
 Download the release file:
 
 ```bash
-curl -fL https://raw.githubusercontent.com/anilgulecha/ttydterm/main/index.html -o "$HOME/ttydterm.html"
+curl -fL https://www.gulecha.org/ttydterm/index.html -o "$HOME/ttydterm.html"
 ```
 
 Replace `user:password` with credentials you choose, then start ttydterm after

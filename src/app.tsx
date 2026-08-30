@@ -1785,12 +1785,12 @@ function App() {
 
             <span className="brand-block">
               <span className="brand-name">ttydterm</span>
-              <span className="brand-version">v{APP_VERSION}</span>
             </span>
           ) : null}
           <button className="rail-toggle" title={(railOpen ? 'Hide' : 'Show') + ' sidebar (⌘/Ctrl+B)'}
                   aria-label={railOpen ? 'Hide sidebar' : 'Show sidebar'} aria-expanded={railOpen}
                   onClick={() => setRailOpen(!railOpen)}><Ico.panel /></button>
+          {railOpen ? <span className="brand-version">v{APP_VERSION}</span> : null}
         </div>
         {}
         <div className="rail-list">

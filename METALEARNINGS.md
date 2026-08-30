@@ -135,3 +135,11 @@ These rules apply to terminal workspaces and other single-file browser tools.
 44. Separate completion attention from system notification policy. Record an
     unread event first, then apply permission, visibility, focus, and privacy
     checks before asking the operating system to notify.
+
+45. Consolidate product documentation with the product's own layout. A compact
+    split overview can teach structure, controls, and features without extra
+    navigation pages.
+
+46. Capture release screenshots from the generated artifact, then inspect the
+    final crop. Test fixtures can be correct while the image still truncates a
+    label or gives empty space too much weight.

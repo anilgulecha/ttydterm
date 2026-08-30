@@ -1,6 +1,6 @@
 
 import { execSync } from 'node:child_process';
-import { mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 
 const gRoot = execSync('npm root -g').toString().trim();
 const { chromium } = await import(`${gRoot}/playwright/index.mjs`);
@@ -83,6 +83,9 @@ await page.addInitScript(() => {
 
 console.log('\nttyd-workspace smoke test');
 ok('tracked files contain no hard copy tells', copyTellHits.length === 0, copyTellHits.join(' | '));
+ok('GitHub README links the shipped product screenshot',
+  readFileSync('README.md','utf8').includes('![ttydterm showing a README workspace with three terminal panes](docs/ttydterm.png)') &&
+  existsSync('docs/ttydterm.png') && statSync('docs/ttydterm.png').size > 10000);
 
 await page.goto(BASE, { waitUntil: 'networkidle' });
 await page.evaluate(() => localStorage.clear());
@@ -119,7 +122,8 @@ const stray = await page.evaluate(() => {
         const host = node.parentElement;
         if (host.closest('.term')) continue;          // terminal content is allowed
         if (host.closest('.folder')) continue;        // folder names are allowed
-        if (host.closest('.brand-block')) continue;   // product name + release, once
+        if (host.closest('.brand-block')) continue;   // product name, once
+        if (host.closest('.brand-version')) continue; // release badge
         if (host.closest('dialog')) continue;         // overlays are allowed
         if (host.closest('.panesettings')) continue;  // ...including the pane popover
         out.push(host.className + ': ' + node.textContent.trim().slice(0, 40));
@@ -139,10 +143,16 @@ ok('the brand sits above the workspace list', await page.evaluate(() => {
   const l = document.querySelector('.rail-list');
   return !!b && !!l && b.getBoundingClientRect().bottom <= l.getBoundingClientRect().top + 1;
 }));
-ok('the collapse control sits to the right of the brand', await page.evaluate(() => {
+ok('the collapse control sits to the right of the brand on the same centre line', await page.evaluate(() => {
   const b = document.querySelector('.brand-name');
   const t = document.querySelector('.rail-head .rail-toggle');
-  return !!b && !!t && t.getBoundingClientRect().left >= b.getBoundingClientRect().right - 1;
+  if(!b||!t)return false;const br=b.getBoundingClientRect(),tr=t.getBoundingClientRect();
+  return t.getBoundingClientRect().left >= br.right - 1 && Math.abs((br.top+br.height/2)-(tr.top+tr.height/2))<=1;
+}));
+ok('the release is a top-right badge',await page.evaluate(()=>{
+  const badge=document.querySelector('.brand-version'),head=document.querySelector('.rail-head');if(!badge||!head)return false;
+  const b=badge.getBoundingClientRect(),h=head.getBoundingClientRect(),style=getComputedStyle(badge);
+  return badge.textContent==='v1.2'&&Math.abs(b.right-(h.right-8))<=1&&Math.abs(b.top-(h.top+4))<=1&&parseFloat(style.borderRadius)>=10&&style.boxShadow!=='none';
 }));
 
 ok('each workspace row uses one triple-dot menu control', await page.evaluate(() =>
@@ -1221,45 +1231,57 @@ await demo.waitForSelector('.surface:not([hidden]) .doc-term[data-doc="readme"]'
 ok('static documentation has no console/page errors', demoErrors.length === 0, demoErrors.join(' | '));
 
 const docNames = await demo.$$eval('.folder-name', (nodes) => nodes.map((node) => node.textContent));
-ok('documentation has the seven requested pages in reading order',
-  docNames.join('|') === 'README|Using it|Keyboard|Themes|Customizations|Security|Contributing', docNames.join('|'));
-ok('Installation and Setup are replaced by Using it', !docNames.includes('Installation') && !docNames.includes('Setup') && docNames.includes('Using it'));
+ok('documentation has four focused pages in reading order',
+  docNames.join('|') === 'README|Using it|Themes|Security', docNames.join('|'));
+ok('Keyboard, Customizations, and Contributing are combined into README',
+  !['Keyboard','Customizations','Contributing'].some((name)=>docNames.includes(name)));
 const docPatterns = await demo.$$eval('.doc-term', (terms) => terms.map((term) =>
   [...term.classList].find((name) => name.startsWith('pattern-'))));
 ok('every documentation page has a distinct background pattern',
-  new Set(docPatterns).size === 7, docPatterns.join(','));
-ok('Keyboard page has a pictogram rather than initials', await demo.evaluate(() => {
-  const row = [...document.querySelectorAll('.folder')].find((folder) => folder.querySelector('.folder-name')?.textContent === 'Keyboard');
-  return !!row?.querySelector('.folder-badge svg[data-icon="keyboard"]');
-}));
+  new Set(docPatterns).size === 4, docPatterns.join(','));
 
+const readmePanes=demo.locator('.surface:not([hidden]) .pane');
+ok('README demonstrates one left pane plus a stacked right pair',
+  await readmePanes.count() === 3 && await demo.evaluate(() => {
+    const surface=document.querySelector('.surface:not([hidden])'),outer=surface?.querySelector('.canvas > .split.columns');
+    if(!outer)return false;const slots=[...outer.children].filter((node)=>node.classList?.contains('slot'));
+    const nested=slots[1]?.querySelector(':scope > .split.rows');if(!nested)return false;
+    const rows=[...nested.children].filter((node)=>node.classList?.contains('slot'));
+    const widths=slots.map((node)=>node.getBoundingClientRect().width),heights=rows.map((node)=>node.getBoundingClientRect().height);
+    return slots.length===2&&rows.length===2&&Math.abs(widths[0]-widths[1])<=2&&Math.abs(heights[0]-heights[1])<=2;
+  }));
 const lead = await demo.locator('.surface:not([hidden]) .doc-lead').textContent();
-ok('README opens with the exact plain statement', lead ===
-  'ttydterm puts a terminal workspace in your browser. ttyd serves one custom index.html file with the full interface.', lead);
+ok('README opens with the approved tagline', lead ===
+  'A terminal in your browser, with unix tools (ttyd, tmux) that you love and trust.', lead);
 const docTypography = await demo.evaluate(() => {
   const term = document.querySelector('.surface:not([hidden]) .doc-term');
   const body = term?.querySelector('.doc-body');
   const lead = term?.querySelector('.doc-lead');
-  const command = term?.querySelector('.doc-command code');
-  if (!term || !body || !lead || !command) return null;
-  const termStyle = getComputedStyle(term), bodyStyle = getComputedStyle(body), leadStyle = getComputedStyle(lead), commandStyle = getComputedStyle(command);
-  return {
-    termFamily:termStyle.fontFamily, bodyFamily:bodyStyle.fontFamily,
-    termSize:termStyle.fontSize, bodySize:bodyStyle.fontSize,
-    leadBackground:leadStyle.backgroundColor, commandBackground:commandStyle.backgroundColor,
-    leadRadius:leadStyle.borderRadius, commandShadow:commandStyle.boxShadow,
-  };
+  const code = term?.querySelector('.doc-code');
+  if (!term || !body || !lead || !code) return null;
+  const termStyle=getComputedStyle(term),bodyStyle=getComputedStyle(body),leadStyle=getComputedStyle(lead),codeStyle=getComputedStyle(code);
+  return {termFamily:termStyle.fontFamily,bodyFamily:bodyStyle.fontFamily,termSize:termStyle.fontSize,bodySize:bodyStyle.fontSize,
+    leadBackground:leadStyle.backgroundColor,codeBackground:codeStyle.backgroundColor,leadRadius:leadStyle.borderRadius,codeRadius:codeStyle.borderRadius};
 });
 ok('documentation renders as plain monospace terminal file output', !!docTypography &&
-  docTypography.bodyFamily === docTypography.termFamily && docTypography.bodySize === docTypography.termSize &&
-  docTypography.leadBackground === 'rgba(0, 0, 0, 0)' && docTypography.commandBackground === 'rgba(0, 0, 0, 0)' &&
-  docTypography.leadRadius === '0px' && docTypography.commandShadow === 'none', JSON.stringify(docTypography));
+  docTypography.bodyFamily===docTypography.termFamily&&docTypography.bodySize===docTypography.termSize&&
+  docTypography.leadBackground==='rgba(0, 0, 0, 0)'&&docTypography.codeBackground==='rgba(0, 0, 0, 0)'&&
+  docTypography.leadRadius==='0px'&&docTypography.codeRadius==='0px',JSON.stringify(docTypography));
+const readmeText=await readmePanes.allTextContents();
+ok('README combines features, keyboard controls, and issue-only contributions',
+  readmeText.some((text)=>text.includes('Workspaces:')&&text.includes('Hackable:')&&text.includes("I've set up the base"))&&
+  readmeText.some((text)=>text.includes('Alt + 1…9')&&text.includes('Ctrl/⌘ + Shift + ,'))&&
+  readmeText.some((text)=>text.includes('contributions only as issues')&&text.includes('Please do not open pull requests')&&text.includes('send me an email note')));
+ok('every feature starts with a bold headline',await demo.evaluate(()=>{
+  const pane=document.querySelectorAll('.surface:not([hidden]) .pane')[1];
+  const items=[...pane.querySelectorAll('.doc-list li')];return items.length===10&&items.every((item)=>item.firstElementChild?.matches('strong.doc-em'));
+}));
 ok('README link and MIT license are separate readable content', await demo.evaluate(() => {
   const body = document.querySelector('.surface:not([hidden]) .doc-body');
   const link = body?.querySelector('a[href="https://github.com/anilgulecha/ttydterm"]');
   return !!link && link.textContent === 'https://github.com/anilgulecha/ttydterm' && body?.textContent.includes('(MIT licensed)');
 }));
-ok('README sends the reader to Using it', (await demo.locator('.surface:not([hidden]) .doc-body').textContent()).includes('Open Using it'));
+ok('README sends the reader to Using it',readmeText.some((text)=>text.includes('Open Using it')));
 
 const bannerCommand = (await demo.locator('.setup-notice code').textContent()) || '';
 ok('one authenticated loopback command carries the required ttyd flags',
@@ -1268,8 +1290,6 @@ ok('one authenticated loopback command carries the required ttyd flags',
   bannerCommand.includes('-I "$HOME/ttydterm.html"') && bannerCommand.includes('-t cursorBlink=false') && bannerCommand.endsWith('bash -l'));
 ok('canonical launch command stays direct and blocks URL child arguments',
   !bannerCommand.includes('bash -c') && !bannerCommand.includes(' -a '));
-ok('README renders the exact banner launch command',
-  (await demo.locator('.surface:not([hidden]) .doc-command code').first().textContent()) === bannerCommand);
 
 await demo.locator('.folder', { hasText: 'Using it' }).click();
 const usingText = await demo.locator('.surface:not([hidden]) .doc-body').textContent();
@@ -1277,36 +1297,8 @@ ok('Using it includes four scoped package managers, download, localhost auth and
   ['brew install ttyd tmux','sudo apt install ttyd tmux','sudo dnf install ttyd tmux','sudo pacman -S ttyd tmux',
    'curl -fL https://www.gulecha.org/ttydterm/index.html','http://localhost:7681',
    'Replace user:password with credentials you choose','while the tmux server and session run'].every((text) => usingText.includes(text)));
-
-await demo.locator('.folder', { hasText: 'Keyboard' }).click();
-await demo.waitForSelector('.surface:not([hidden]) .doc-term[data-doc="keyboard"]');
-const keyboardText = await demo.locator('.surface:not([hidden]) .doc-body').textContent();
-ok('Keyboard page points to the sidebar-footer keyboard icon',
-  keyboardText.includes('keyboard icon in the sidebar footer') && keyboardText.includes('collapsed sidebar'));
-
-await demo.locator('.folder', { hasText: 'Customizations' }).click();
-await demo.waitForSelector('.surface:not([hidden]) .doc-term[data-doc="customizations"]');
-await demo.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-const customPanes = demo.locator('.surface:not([hidden]) .pane');
-ok('Customizations demonstrates one left pane plus a stacked right pair',
-  await customPanes.count() === 3 && await demo.evaluate(() => {
-    const surface = document.querySelector('.surface:not([hidden])');
-    const outer = surface?.querySelector('.canvas > .split.columns');
-    if (!outer) return false;
-    const slots = [...outer.children].filter((node) => node.classList?.contains('slot'));
-    const nested = slots[1]?.querySelector(':scope > .split.rows');
-    if (!nested) return false;
-    const rows = [...nested.children].filter((node) => node.classList?.contains('slot'));
-    if (slots.length !== 2 || rows.length !== 2) return false;
-    const widths = slots.map((node) => node.getBoundingClientRect().width);
-    const heights = rows.map((node) => node.getBoundingClientRect().height);
-    return Math.abs(widths[0] - widths[1]) <= 2 && Math.abs(heights[0] - heights[1]) <= 2;
-  }));
-const customText = await customPanes.allTextContents();
-ok('Customizations explains right-click splits and per-pane command/tmux settings',
-  customText.some((text) => text.includes('Right-click a pane')) &&
-  customText.some((text) => text.includes('own command')) && customText.some((text) => text.includes('own tmux setting')));
-await demo.screenshot({ path: `${SHOTS}/30-customizations-doc.png` });
+ok('Using it renders the exact banner launch command',
+  (await demo.locator('.surface:not([hidden]) .doc-command code').last().textContent()) === bannerCommand);
 
 await demo.locator('.folder', { hasText: 'Themes' }).click();
 await demo.waitForSelector('.surface:not([hidden]) .doc-themes .theme-opt');
@@ -1386,12 +1378,6 @@ const securityText = await demo.locator('.surface:not([hidden]) .doc-body').text
 ok('Security explains origin checks, authentication, trusted shell input, TLS, and tmux continuity',
   ['rejects a WebSocket request','Basic Auth checks a username and password','every command from a restored configuration',
    'add TLS','tmux keeps a process alive'].every((text) => securityText.includes(text)));
-await demo.locator('.folder', { hasText: 'Contributing' }).click();
-await demo.waitForSelector('.surface:not([hidden]) .doc-term[data-doc="contributing"]');
-const contributingText = await demo.locator('.surface:not([hidden]) .doc-body').textContent();
-ok('Contributing sends changes through issues with a reason and implementation prompt',
-  contributingText.includes('accepts issues instead of pull requests') && contributingText.includes('what should change and why') &&
-  contributingText.includes('implementation prompt') && contributingText.includes('when time allows'));
 
 await demo.setViewportSize({ width:600, height:720 });
 await demo.goto(RAW_BASE + '#/f/doc-using', { waitUntil:'networkidle' });

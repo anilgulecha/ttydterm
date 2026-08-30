@@ -1,5 +1,5 @@
 /* Static hosts and file:// cannot open a ttyd terminal. In those modes the app
-   shows seven documentation workspaces. This typed model keeps the copy,
+   shows four documentation workspaces. This typed model keeps the copy,
    layout, and live theme picker separate from the React renderer. */
 
 import { TTYD_FLAGS, TTYD_URL, ttydDownloadCommand, ttydLaunchCommand } from './commands';
@@ -29,7 +29,7 @@ export interface DocSection {
   blocks: DocBlock[];
 }
 
-/* The Customizations page uses the split layout that its text describes. */
+/* The README uses the product's split layout to keep the overview compact. */
 export type DocLayout = 'single' | 'demo-split';
 
 export interface DocPage {
@@ -46,17 +46,53 @@ export interface DocPage {
 const REPO = 'https://github.com/anilgulecha/ttydterm';
 
 export const README_LEAD =
-  'ttydterm puts a terminal workspace in your browser. ttyd serves one custom index.html file with the full interface.';
+  'A terminal in your browser, with unix tools (ttyd, tmux) that you love and trust.';
 
-const readme: DocSection = {
+const readmeMain: DocSection = {
   blocks: [
     { kind: 'lead', spans: [em(README_LEAD)] },
-    { kind: 'para', spans: [t('Start it with this command on your computer:')] },
-    { kind: 'command', command: ttydLaunchCommand() },
+    { kind: 'para', spans: [t('ttydterm adds workspaces, split panes, themes, tmux continuity, and command completion alerts to vanilla ttyd.')] },
+    { kind: 'para', spans: [t('One offline '), code('index.html'), t(' contains the full interface.')] },
+    { kind: 'para', spans: [t('Open '), em('Using it'), t(' for installation and setup.')] },
     { kind: 'para', spans: [link(REPO), t(' (MIT licensed)')] },
-    { kind: 'para', spans: [t('ttyd serves this offline index.html. The page reads the session token from /token and connects to the terminal at /ws on the same origin. The file bundles xterm.js, React, and all styles, so the interface loads without a runtime network dependency.')] },
-    { kind: 'para', spans: [t('The sidebar holds workspaces. Each workspace has its own theme, pane layout, and commands. A pane can run its command in tmux so the process stays alive after the browser disconnects.')] },
-    { kind: 'para', spans: [t('Open '), em('Using it'), t(' in the sidebar for install and run steps.')] },
+    { kind: 'heading', text: 'Contributions' },
+    { kind: 'para', spans: [t('This project accepts contributions only as issues. Include your request and, optionally, a prompt you tested that builds the feature.')] },
+    { kind: 'para', spans: [t('Please do not open pull requests. I only trust changes I build myself, in my own way.')] },
+    { kind: 'para', spans: [t('Forks and experimentation are welcome. If you try something interesting, send me an email note. :)')] },
+  ],
+};
+
+const readmeFeatures: DocSection = {
+  blocks: [
+    { kind: 'heading', text: 'Features' },
+    { kind: 'list', items: [
+      [em('Workspaces:'), t(' Keep projects and terminals separate.')],
+      [em('Split panes:'), t(' Arrange rows and columns.')],
+      [em('Pane setup:'), t(' Choose each command and working directory.')],
+      [em('tmux continuity:'), t(' Keep processes running through disconnects.')],
+      [em('Completion alerts:'), t(' Mark finished commands and notify when away.')],
+      [em('Themes:'), t(' Choose colors, patterns, fonts, and weights.')],
+      [em('Keyboard control:'), t(' Navigate and search without the mouse.')],
+      [em('Backup:'), t(' Export and restore your workspace configuration.')],
+      [em('Offline:'), t(' Run the complete interface from one index.html.')],
+      [em('Hackable:'), t(" Build your terminal just like you want it. I've set up the base.")],
+    ] },
+  ],
+};
+
+const readmeKeyboard: DocSection = {
+  blocks: [
+    { kind: 'heading', text: 'Keyboard' },
+    { kind: 'defs', items: [
+      { term:'Alt + 1…9', detail:'switch workspace' },
+      { term:'Alt + Arrow', detail:'move between panes' },
+      { term:'Ctrl/⌘ + K or P', detail:'find a workspace or terminal' },
+      { term:'Ctrl/⌘ + B', detail:'toggle the sidebar' },
+      { term:'Ctrl/⌘ + ,', detail:'open global settings' },
+      { term:'Ctrl/⌘ + Shift + ,', detail:'open workspace settings' },
+      { term:'Escape', detail:'close a menu or dialog' },
+    ] },
+    { kind: 'para', spans: [t('Right-click a pane for splits, paste, settings, and close.')] },
   ],
 };
 
@@ -80,23 +116,6 @@ const usingIt: DocSection = {
   ],
 };
 
-const keyboard: DocSection = {
-  blocks: [
-    { kind: 'lead', spans: [em('The app keeps the full shortcut list behind the keyboard icon in the sidebar footer.')] },
-    { kind: 'para', spans: [t('Expand a collapsed sidebar with the top panel button or '), code('Ctrl/⌘ + B'), t(', then select the keyboard icon.')] },
-    { kind: 'heading', text: 'Useful shortcuts' },
-    { kind: 'list', items: [
-      [code('Alt + 1…9'), t(': open that workspace and focus its last terminal.')],
-      [code('Alt + Arrow'), t(': move between panes in the current workspace.')],
-      [code('Ctrl/⌘ + K'), t(': find and focus a workspace or terminal.')],
-      [code('Ctrl/⌘ + B'), t(': collapse or expand the sidebar.')],
-      [code('Ctrl/⌘ + ,'), t(': open global settings. Add Shift to open settings for the current workspace.')],
-      [code('Escape'), t(': close the open menu or dialog.')],
-    ] },
-    { kind: 'para', spans: [t('The app handles these shortcuts before xterm receives them. It sends all other keys to the process in the pane.')] },
-  ],
-};
-
 const themes: DocSection = {
   blocks: [
     { kind: 'lead', spans: [em('Each workspace keeps its own theme.')] },
@@ -105,26 +124,6 @@ const themes: DocSection = {
     { kind: 'para', spans: [t('Open another page and return here to check the saved choice. A real ttyd session puts this control in each workspace settings dialog and in global settings at '), code('Ctrl/⌘ + ,'), t('.')] },
     { kind: 'para', spans: [t('Every built-in theme passes the text and focus contrast checks in the test suite.')] },
     { kind: 'para', spans: [t('This demo keeps changes in memory. It does not replace a saved terminal workspace.')] },
-  ],
-};
-
-const customizationsLeft: DocSection = {
-  blocks: [
-    { kind: 'lead', spans: [em('Each workspace keeps its own pane layout.')] },
-    { kind: 'para', spans: [t('This page shows equal left and right columns. The right column has a top pane and a bottom pane.')] },
-    { kind: 'para', spans: [t('Right-click a pane to open its menu. You can split it into 2, 3, or 4 columns or rows. The menu also opens settings, pastes text, and closes the pane.')] },
-    { kind: 'para', spans: [t('Drag a divider to resize two panes. You can also focus the divider with Tab and use the arrow keys.')] },
-  ],
-};
-const customizationsTop: DocSection = {
-  blocks: [
-    { kind: 'para', spans: [em('Each pane has its own command.'), t(' Open pane settings and enter a development server, log command, editor, or shell command.')] },
-  ],
-};
-const customizationsBottom: DocSection = {
-  blocks: [
-    { kind: 'para', spans: [em('Each pane has its own tmux setting.'), t(' Turn on '), em('Run in tmux'), t(' for a process that should survive a browser or ttyd disconnect.')] },
-    { kind: 'para', spans: [em('Completed Bash commands mark their workspace.'), t(' Global settings can also show a privacy-safe system notification when that workspace or browser window is inactive.')] },
   ],
 };
 
@@ -147,31 +146,13 @@ const security: DocSection = {
   ],
 };
 
-const contributing: DocSection = {
-  blocks: [
-    { kind: 'lead', spans: [em('This repository accepts issues instead of pull requests.')] },
-    { kind: 'para', spans: [t('The maintainer makes repository changes. Open an issue when you want to suggest a change or report a bug.')] },
-    { kind: 'heading', text: 'Suggest a change' },
-    { kind: 'list', items: [
-      [t('Ask your coding agent to open an issue at '), link(REPO + '/issues', REPO + '/issues'), t('.')],
-      [t('State what should change and why.')],
-      [t('Include an implementation prompt with enough detail for a coding agent to make the change in this repository.')],
-    ] },
-    { kind: 'para', spans: [t('The maintainer may use the suggestion when time allows.')] },
-    { kind: 'para', spans: [t('For a bug, include steps to reproduce it, your browser, and your ttyd version.')] },
-  ],
-};
-
 /* Keep README first. Each page uses a different pattern. */
 export const DOC_PAGES: DocPage[] = [
-  { id:'readme', name:'README', title:'README', icon:'book', pattern:'dots', theme:'paper', layout:'single', sections:[readme] },
+  { id:'readme', name:'README', title:'README', icon:'book', pattern:'dots', theme:'paper', layout:'demo-split',
+    sections:[readmeMain, readmeFeatures, readmeKeyboard] },
   { id:'using', name:'Using it', title:'Using it', icon:'rocket', pattern:'grid', theme:'daylight', layout:'single', sections:[usingIt] },
-  { id:'keyboard', name:'Keyboard', title:'Keyboard shortcuts', icon:'keyboard', pattern:'cross', theme:'mist', layout:'single', sections:[keyboard] },
   { id:'themes', name:'Themes', title:'Themes', icon:'palette', pattern:'waves', theme:'night', layout:'single', sections:[themes] },
-  { id:'customizations', name:'Customizations', title:'Customizations', icon:'layers', pattern:'diagonal', theme:'sand', layout:'demo-split',
-    sections:[customizationsLeft, customizationsTop, customizationsBottom] },
   { id:'security', name:'Security', title:'Security', icon:'shield', pattern:'bricks', theme:'paper', layout:'single', sections:[security] },
-  { id:'contributing', name:'Contributing', title:'Contributing', icon:'users', pattern:'plain', theme:'daylight', layout:'single', sections:[contributing] },
 ];
 
 export const docPage = (id: string | undefined): DocPage | null =>

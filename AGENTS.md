@@ -28,16 +28,16 @@ Canonical source lives in `src/`; `index.html` is generated.
 
 ## Source layout
 
-- `src/app.tsx` — application, terminal runtime, workspace behavior
-- `src/modal.tsx` — shared modal and form primitives
-- `src/types.ts` — configuration and runtime domain types
-- `src/commands.ts` — shell and tmux command construction
-- `src/styles.css` — all styling and semantic theme tokens
-- `src/template.html` — generated document shell
-- `src/vendor-types/` — pinned local declarations for global runtime libraries
-- `build.mjs` — strict typecheck, bundle, and offline assembly
-- `test.mjs` — browser regression, accessibility, and contrast assertions
-- `index.html` — generated release and Pages artifact
+- `src/app.tsx`: application, terminal runtime, workspace behavior
+- `src/modal.tsx`: shared modal and form primitives
+- `src/types.ts`: configuration and runtime domain types
+- `src/commands.ts`: shell and tmux command construction
+- `src/styles.css`: all styling and semantic theme tokens
+- `src/template.html`: generated document shell
+- `src/vendor-types/`: pinned local declarations for global runtime libraries
+- `build.mjs`: strict typecheck, bundle, and offline assembly
+- `test.mjs`: browser regression, accessibility, and contrast assertions
+- `index.html`: generated release and Pages artifact
 
 ## Development
 
@@ -84,7 +84,7 @@ inputs; output must be deterministic.
 - Keep inactive workspaces mounted; switching workspaces must not restart
   terminals or animations.
 - Add a regression test for every bug fix. Test the reported outcome, not only
-  the intermediate state—for example, verify xterm's input receives focus, not
+  the intermediate state. For example, verify xterm's input receives focus, not
   merely that the pane ring changes.
 - Record key generalized learnings about how problems are approached, corrected,
   and solved in `METALEARNINGS.md`; keep it as portable guidance, not a task log.

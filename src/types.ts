@@ -1,7 +1,4 @@
-/* The app's domain, as types. These exist so the compiler — not a browser
-   assertion — rejects the mistakes this codebase actually made: reading
-   `children` off a pane, `token` off a runtime that has no socket, or a route
-   segment that is not there. */
+/* Domain types keep config, layout, and runtime branches checked offline. */
 
 export type Appearance = 'dark' | 'light';
 
@@ -37,16 +34,12 @@ export interface Theme {
   ui: ThemeUiTokens;
 }
 
-/* A layout node is a discriminated union, so `node.children` is a compile
-   error on a pane and `node.command` is one on a split. */
 export interface PaneNode {
   type: 'pane';
   id: string;
   command: string;
   persist: boolean;
-  /* Documentation workspaces only: which section of the page this pane shows.
-   * Absent on every real pane, and deliberately dropped by validateConfig —
-   * documentation is never restored from untrusted JSON. */
+  /* Documentation configs use this field. Restored user configs drop it. */
   docSection?: number;
 }
 export type SplitAxis = 'columns' | 'rows';
@@ -68,8 +61,7 @@ export interface Folder {
   icon: string | null;
   pattern: PatternName;
   layout: LayoutNode | null;
-  /* Documentation workspaces only: the id of the page this workspace renders
-   * (see docs.ts). Absent on every real workspace. */
+  /* Documentation configs use this page id. Restored user configs drop it. */
   doc?: string;
 }
 
@@ -97,8 +89,6 @@ export interface TtydEndpoints {
   ws: string;
 }
 
-/* Runtime is a union on `mode`: `runtime.token` is unreachable unless the
-   probe actually found ttyd. */
 export type Runtime =
   | { mode: 'probing' }
   | { mode: 'mock'; reason: string }

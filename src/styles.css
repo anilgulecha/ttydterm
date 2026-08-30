@@ -2,26 +2,24 @@
     --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
 
-    /* Boot fallbacks only. Once App mounts, chromeVars replaces every token
-       below from the active folder theme. Components consume semantic roles;
-       hardcoded colors live only in the theme table. */
-    --ui-panel:  #f7f8fb;   /* rail surface                                   */
-    --ui-raised: #ffffff;   /* dialogs                                        */
-    --ui-field:  #fbfcfe;   /* inputs                                         */
-    --ui-ink:    #1b2230;   /* primary text        — 15.00 on panel           */
-    --ui-muted:  #5b6577;   /* secondary text/icon —  5.53 on panel           */
-    --ui-edge:   #d5dbe6;   /* hairline                                       */
+
+    --ui-panel:  #f7f8fb;
+    --ui-raised: #ffffff;
+    --ui-field:  #fbfcfe;
+    --ui-ink:    #1b2230;
+    --ui-muted:  #5b6577;
+    --ui-edge:   #d5dbe6;
     --ui-hover:  #e9edf4;
-    --ui-active: #e3e9fb;   /* selected row                                   */
-    --ui-accent: #2f57d4;   /* marker + focus ring —  5.76 on panel           */
-    --ui-danger: #b3261e;   /*                     —  6.54 on white           */
+    --ui-active: #e3e9fb;
+    --ui-accent: #2f57d4;
+    --ui-danger: #b3261e;
     --ui-warn:   #8a4b00;
     --ui-success:#356b2d;
     --ui-selected-ink:#ffffff;
     --ui-shadow: rgba(0,0,0,.42);
     --ui-scrim: rgba(0,0,0,.55);
 
-    /* dialog aliases (same system palette, raised surface) */
+
     --panel: var(--ui-raised);
     --line: var(--ui-edge);
     --ink: var(--ui-ink);
@@ -31,21 +29,9 @@
 
     --radius: 10px;
 
-    /* THE spacing token. Every primary gutter in the app is this one number:
-       the page's outer margin, the sidebar-to-stage gap, and the gap between
-       any two panes. They used to disagree — the shell had `padding: 8px` AND
-       `gap: 8px`, and the rail resizer sat between them with `margin: 0 -4px`,
-       so the sidebar-to-stage channel measured 16px against 8px between panes
-       and the rail read as detached from the workspace it belongs to. The
-       resizer is now a real 8px spacer and .shell has no gap of its own, so a
-       single value produces every channel on screen. test.mjs measures them
-       off the rendered boxes and fails if any two differ.
 
-       It is also read by the layout maths (GAP, below) via getComputedStyle,
-       so the divider thickness the tree reserves cannot drift from the gutter
-       the stylesheet paints. */
     --gap: 8px;
-    --rail-icon-col: 52px;  /* the sidebar's FIXED icon column (see .rail) */
+    --rail-icon-col: 52px;
     color-scheme: light;
   }
 
@@ -54,8 +40,7 @@
   body {
     margin: 0;
     font-family: var(--sans);
-    /* --boot-bg is written by the inline boot script below from the last active
-       theme, so a refresh never flashes white before React paints. */
+
     background: var(--boot-bg, #eef1f6);
     overflow: hidden;
     -webkit-font-smoothing: antialiased;
@@ -63,18 +48,7 @@
   button { font: inherit; color: inherit; cursor: pointer; background: none; border: 0; padding: 0; }
   input, select, textarea { font: inherit; color: inherit; }
 
-  /* =========================================================================
-     SHELL — the gaps behind the panes still follow the active workspace theme
-     (so a dark workspace does not sit in a bright frame), but the SIDEBAR is
-     its own system surface and does not change with it.
 
-     No `gap` here: the rail gutter IS an element (it has to be, it is the
-     resize handle), so a flex gap on top of it would stack two channels into
-     one and make the sidebar sit twice as far from the stage as two panes sit
-     from each other. Padding supplies the outer margin, the gutter supplies
-     the sidebar channel, and a divider supplies the pane channel — all three
-     are --gap.
-     ========================================================================= */
   .shell {
     display: flex;
     height: 100%;
@@ -83,20 +57,7 @@
     background: var(--stage-bg);
   }
 
-  /* ---------- sidebar : the only text on screen ----------
-     ONE element in both states. Collapsing animates its WIDTH only; the icon
-     column is a fixed 52px track that never moves, so every badge and every
-     footer control keeps its exact x/y whether the rail is open or shut.
-     (Two separate elements — .rail + .rail-stub — is what made the icons jump:
-     a row of five buttons became a column of two, and every glyph moved.)
 
-     No perimeter border and no internal hairlines. The rail is a light panel
-     on a stage tinted from the terminal theme, so the colour step already
-     draws its shape; a 1px line on top of that is a second edge saying the
-     same thing. Head and footer are likewise separated by position and
-     spacing, not by rules. (The one thing this must not do is VANISH: the
-     rail/stage step is measured in test.mjs against a floor, including under
-     the light `paper` theme where both surfaces are pale.) */
   .rail {
     flex: 0 0 auto;
     font-family: var(--mono);
@@ -110,10 +71,7 @@
     overflow: hidden;
   }
 
-  /* Brand head. The mark sits in the SAME fixed 52px track as every workspace
-     badge below it, so it is the one fixed point the rail is built around. The
-     wordmark and the collapse toggle occupy the label column, which is the only
-     thing collapsing removes. */
+
   .rail-head {
     flex: 0 0 auto;
     display: flex; align-items: center;
@@ -125,9 +83,7 @@
     height: 100%; color: var(--ui-accent);
   }
   .brand-mark svg { width: 17px; height: 17px; }
-  /* Wordmark plus release, stacked. The block keeps the head's FIXED 44px
-     height, so adding the version moved nothing below it, and it lives in the
-     label column, so the collapsed icon track is untouched. */
+
   .brand-block {
     flex: 1; min-width: 0; padding-left: 18px;
     display: flex; flex-direction: column; justify-content: center; gap: 0;
@@ -153,9 +109,7 @@
   .rail-toggle svg { width: 16px; height: 16px; }
   .rail-toggle:hover { background: var(--ui-hover); color: var(--ui-ink); }
   .rail-toggle:focus-visible { outline: 2px solid var(--ui-accent); outline-offset: 1px; }
-  /* Collapsed: the label column is gone, so the toggle takes the icon track and
-     the mark steps aside — they cannot both own the same 52px. Nothing BELOW
-     the head moves, which is the property that matters. */
+
   .rail.collapsed .brand-block { display: none; }
   .rail.collapsed .brand-mark { display: none; }
   .rail.collapsed .rail-toggle { flex: 0 0 var(--rail-icon-col); width: var(--rail-icon-col); margin-right: 0; border-radius: 0; }
@@ -177,10 +131,7 @@
     line-height: 1.3;
     color: var(--ui-muted);
     text-align: left;
-    /* NO transition. Selecting a workspace has to look instantaneous, and a
-       120ms cross-fade on the row is read as the SWITCH being slow even when
-       the surface behind it swapped in a single frame — the eye blames the
-       slowest thing that moved, not the fastest. */
+
     transition: none;
   }
   .folder:hover { background: var(--ui-hover); color: var(--ui-ink); }
@@ -195,8 +146,7 @@
   }
   .folder-main:focus-visible { outline: 2px solid var(--ui-accent); outline-offset: -2px; }
 
-  /* THE fixed track. Badge, gear and close all live in columns of a known
-     width, so nothing reflows when the label column appears or disappears. */
+
   .folder-badge {
     flex: 0 0 var(--rail-icon-col);
     display: inline-flex; align-items: center; justify-content: center;
@@ -205,21 +155,14 @@
     color: inherit;
   }
   .folder-badge svg { width: 16px; height: 16px; }
-  /* The label owns the whole label column. The action overlays its right edge
-     only while revealed; no shortcut or action clearance is reserved in flow. */
+
   .folder-name { flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
 
-  /* Per-row actions, as an ABSOLUTE OVERLAY on the row's right edge — the same
-     idiom as the pane chrome. It is out of flow, so it reserves nothing and can
-     never change where the name's box ends; it is revealed on hover, on
-     focus-within, and while its own menu is open. The trigger is opaque so the
-     label cannot read through it. */
+
   .folder-actions {
     position: absolute; right: 5px; top: 50%; z-index: 18; transform: translateY(-50%);
     display: flex; align-items: center; gap: 1px;
-    /* opacity + pointer-events, never `visibility`/`display`: a hidden-by-
-       visibility control cannot be focused, so Tab could never reach it and
-       `:focus-within` could never fire. This stays in the tab order. */
+
     opacity: 0; pointer-events: none;
     transition: opacity .12s;
   }
@@ -229,8 +172,7 @@
   .folder-act {
     display: inline-flex; align-items: center; justify-content: center;
     width: 24px; height: 24px; border-radius: 5px;
-    /* Opaque, and in the row's own ink, so it reads as part of the row rather
-       than as a hole punched in it. */
+
     background: var(--ui-raised); color: var(--ui-ink);
     box-shadow: 0 0 0 1px var(--ui-edge);
     transition: background .12s, color .12s;
@@ -244,16 +186,11 @@
   .folder-menu button:hover { background:var(--ui-hover); }
   .folder-menu button.danger { color:var(--ui-danger); }
   .folder-menu svg { width:14px;height:14px; }
-  /* collapsed: the label + actions columns are gone, nothing is hoverable */
+
   .rail.collapsed .folder-name, .rail.collapsed .folder-actions { display: none; }
   .rail.collapsed .folder { border-radius: 0; }
 
-  /* Search + backup, one row, at the foot. They are whole-app actions rather
-     than list items, which is why they are not in the list — and why they are
-     the two things a collapsed rail drops: at 52px a row cannot hold them
-     without stacking into a column, and stacking is what used to move every
-     glyph on screen when the rail closed. Hiding is honest; both are reachable
-     from the keyboard (⌘/Ctrl+K) with the rail shut. */
+
   .rail-foot {
     flex: 0 0 auto;
     display: flex; flex-direction: row; align-items: center;
@@ -265,8 +202,7 @@
   .rail-foot { justify-content: center; }
   .rail-foot .ico { width: 36px; border-radius: 7px; }
 
-  /* pictogram button. Width is the SAME fixed track as a folder badge, so a
-     rail control sits at identical coordinates in both rail states. */
+
   .ico {
     flex: 0 0 auto;
     display: inline-flex; align-items: center; justify-content: center;
@@ -274,20 +210,13 @@
     border-radius: 0 7px 7px 0; color: var(--ui-muted);
     transition: background .12s, color .12s;
   }
-  /* the add row: last item of the workspace list, on the same 52px track and
-     the same 36px row height as the folders above it, so it reads as the next
-     line of that list rather than as a floating button near it */
+
   .ico.add { height: 36px; margin-top: 2px; }
   .ico:hover { background: var(--ui-hover); color: var(--ui-ink); }
   .ico:focus-visible { outline: 2px solid var(--ui-accent); outline-offset: -2px; }
   .ico svg { width: 16px; height: 16px; }
 
-  /* The sidebar-to-stage channel. It is exactly --gap wide and it is the only
-     thing between the two — same grammar, same width and same hit area as a
-     pane divider, so the two gutters are indistinguishable by eye and by
-     ruler. It used to be `margin: 0 -4px` on top of the shell's own flex gap,
-     which collapsed its box to nothing and left a 16px channel: the resizer
-     was invisible AND the sidebar looked detached. */
+
   .rail-gutter { flex: 0 0 var(--gap); position: relative; z-index: 5; }
   .rail-gutter.resizable { cursor: col-resize; }
   .rail-gutter::after {
@@ -298,21 +227,7 @@
   .rail-gutter:focus-visible { outline: none; }
   .rail-gutter:focus-visible::after { background: var(--ui-accent); box-shadow: 0 0 0 2px color-mix(in srgb,var(--ui-accent) 45%,transparent); }
 
-  /* ---------- workspace ----------
-     Every folder is mounted; the active one is RAISED. How the others are
-     hidden is the whole of "switching is instant":
 
-       display:none  — wrong. Restoring a display property restarts every CSS
-                       animation in the subtree, so each switch replayed the
-                       panes' entrance animation and read as the workspace
-                       booting again. It also drops the box, so the surface
-                       re-measures and the ResizeObserver fires on show.
-       visibility    — right. The subtree keeps its box and its layout, is not
-                       painted, is not hit-tested, and is out of the tab order.
-                       Flipping it starts nothing and measures nothing.
-
-     `hidden` stays on the element for its ARIA meaning; its default
-     `display:none` is overridden here deliberately. */
   .stage { position: relative; flex: 1; min-width: 0; }
   .surface { position: absolute; inset: 0; z-index: 1; }
   .surface[hidden] {
@@ -329,11 +244,7 @@
   .split.rows { flex-direction: column; }
   .slot { position: relative; flex: 0 0 auto; min-width: 0; min-height: 0; }
 
-  /* A pane gutter. Its WIDTH is the spacing token, so the channel a user grabs
-     and the channel a user sees are the same 8px — and the same 8px as the
-     page margin and the sidebar channel. The 2px indicator inside it is a
-     hover/focus affordance painted over that channel, never an addition to
-     it. */
+
   .divider { flex: 0 0 auto; position: relative; z-index: 3; }
   .columns > .divider { width: var(--gap); cursor: col-resize; }
   .rows > .divider { height: var(--gap); cursor: row-resize; }
@@ -350,41 +261,19 @@
   .divider:focus-visible::after { opacity:1;box-shadow: 0 0 0 2px color-mix(in srgb, var(--stage-accent) 45%, transparent); }
   @media(prefers-reduced-motion:reduce){.divider::after{transition:none}}
 
-  /* ---------- pane ----------
-     The pane is a POSITIONING box only. Its FOCUSED border is drawn by
-     `.pane-edge`, an overlay sibling of the terminal, for two reasons:
-       • an outer box-shadow was clipped by the slot/canvas/viewport chain, so
-         a focused pane at the canvas edge showed a ring on two sides only;
-       • an INSET shadow on .pane is painted under .term's own background, so
-         it vanished entirely.
-     An overlay above the terminal is the only one of the three that is
-     continuous on all four sides in every position.
 
-     AT REST THERE IS NO BORDER. A terminal already owns a filled rectangle in
-     its own theme colour; the stage behind it is that same colour shifted, so
-     the boundary is drawn by the two surfaces meeting across the gutter. A
-     hairline on top of that is a third edge describing an edge that is already
-     there. Removing it also gives `focused` something unambiguous to say: the
-     ring is now PRESENT vs ABSENT rather than one shade of grey vs another,
-     which is the state it was failing to communicate. */
   .pane {
     position: absolute; inset: 0;
     border-radius: var(--radius);
     overflow: hidden;
     outline: none;
   }
-  /* z-index 9: ABOVE every piece of pane chrome (control 4, popup 5, settings
-     6). The border is the pane's outline and nothing may break it — the corner
-     control used to paint over the top-right arc, so a focused pane's ring had
-     a visible notch in it. Now the ring is painted last, over everything. */
+
   .pane-edge {
     position: absolute; inset: 0; z-index: 9;
     border-radius: var(--radius);
     pointer-events: none;
-    /* Rest: nothing. Focus: a 2px inset ring. Because the ring is INSET and the
-       overlay is a sibling that changes no geometry, the terminal underneath
-       does not move or resize by a pixel when focus arrives — which is the
-       property that made an overlay the right answer in the first place. */
+
     box-shadow: none;
     transition: box-shadow .14s ease;
   }
@@ -408,13 +297,10 @@
   .xterm-term::before { z-index:0; }
   .xterm-host { position:absolute;inset:7px 8px;z-index:1; }
   .xterm-term .xterm, .xterm-term .xterm-viewport, .xterm-term .xterm-screen { background:transparent !important; }
-  /* tmux owns history/copy-mode when persistence is enabled. Hiding xterm's
-     viewport scrollbar avoids two competing scroll positions; wheel events
-     still reach xterm and are encoded as mouse input once tmux enables mouse. */
+
   .tmux-terminal .xterm-viewport { overflow-y:hidden !important; scrollbar-width:none; }
   .tmux-terminal .xterm-viewport::-webkit-scrollbar { display:none; }
-  /* A quiet overlay-like scrollbar: transparent track, rounded theme-derived
-     thumb. Applied to every app scroll surface; tmux panes still hide theirs. */
+
   * { scrollbar-width:thin;scrollbar-color:color-mix(in srgb,var(--ui-muted) 48%,transparent) transparent; }
   *::-webkit-scrollbar { width:8px;height:8px; }
   *::-webkit-scrollbar-track { background:transparent; }
@@ -435,10 +321,7 @@
   .setup-notice { color:var(--ink); }
   .setup-notice > span { color:var(--muted); }
   .setup-notice code { overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:38vw;padding:4px 6px;border-radius:4px;background:var(--ui-field);font-family:var(--mono); }
-  /* The banner's actions sit on the theme's solid active fill, so they must
-     carry the ink CALCULATED to pair with it. Inheriting the banner's body ink
-     put --ui-ink on --ui-active — foreground text on a saturated blue — which
-     is the pairing the contrast audit exists to catch. */
+
   .setup-notice button {
     flex:0 0 auto;padding:5px 8px;border-radius:5px;
     background:var(--ui-active);color:var(--ui-selected-ink);font-weight:600;
@@ -458,108 +341,85 @@
   .term-link { text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
   .term-link:hover { filter: brightness(1.25); }
 
-  /* ---------------------------------------------------------------
-     Documentation panes. Still a terminal surface — same palette, same
-     pattern, same prompt lines — but the body between the prompts is prose,
-     so it gets prose spacing. A doc page is longer than its pane, so this is
-     the one terminal surface that scrolls its own content.
-     --------------------------------------------------------------- */
+
   .doc-term {
     overflow-y:auto;overscroll-behavior:contain;
     padding-bottom:72px;scroll-padding-bottom:72px;
   }
-  /* These follow the base rule deliberately: the demo banner gains a second
-     grid row, then becomes a vertical stack, so its scroll clearance must win
-     the cascade at those widths. */
+
   @media(max-width:1000px){
     .doc-term{padding-bottom:108px;scroll-padding-bottom:108px}
   }
   @media(max-width:760px){
     .doc-term{padding-bottom:220px;scroll-padding-bottom:220px}
   }
-  .doc-body { margin: 10px 0 12px; max-width: 74ch; font-family: var(--sans); white-space: normal; }
-  .doc-title { margin: 0 0 10px; font-size: 15px; font-weight: 700; letter-spacing: .01em; color: var(--t-fg); }
-  /* The sentence the page is built around: bigger, and with real air above and
-     below it, so the page has an entry point instead of an even grey wall. */
+  .doc-body {
+    margin:8px 0 10px;max-width:92ch;
+    font-family:var(--mono);font-size:inherit;line-height:inherit;
+    white-space:normal;
+  }
+  .doc-title {
+    margin:0 0 9px;font-family:inherit;font-size:inherit;line-height:inherit;
+    font-weight:700;letter-spacing:0;color:var(--t-yellow);
+  }
+  .doc-title::before { content:"# "; }
   .doc-lead {
-    margin: 14px 0 18px; padding: 12px 14px;
-    border-radius: 8px;
-    background: color-mix(in srgb, var(--t-fg) 6%, var(--t-bg));
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--t-fg) 16%, var(--t-bg));
-    font-size: 14.5px; line-height: 1.6; color: var(--t-fg);
+    margin:0 0 10px;padding:0;
+    font:inherit;color:var(--t-fg);
   }
-  .doc-para { margin: 0 0 12px; font-size: 12.5px; line-height: 1.65; color: var(--t-fg); }
-  .doc-heading { margin: 18px 0 8px; font-size: 12.5px; font-weight: 700; letter-spacing: .02em; color: var(--t-fg); }
-  .doc-em { font-weight: 700; color: var(--t-fg); }
+  .doc-para { margin:0 0 10px;font:inherit;color:var(--t-fg); }
+  .doc-heading {
+    margin:14px 0 6px;font-family:inherit;font-size:inherit;line-height:inherit;
+    font-weight:700;letter-spacing:0;color:var(--t-yellow);
+  }
+  .doc-heading::before { content:"## "; }
+  .doc-em { font-weight:700;color:var(--t-fg); }
   .doc-code, .doc-command code, .doc-defs dt code {
-    font-family: var(--mono); font-size: 12px;
-    padding: 1px 5px; border-radius: 4px;
-    background: color-mix(in srgb, var(--t-fg) 10%, var(--t-bg));
-    color: var(--t-fg);
+    padding:0;border-radius:0;background:transparent;
+    font:inherit;color:var(--t-cyan);
   }
-  .doc-command { margin: 0 0 12px; display: flex; flex-direction: column; gap: 4px; }
-  .doc-caption { font-size: 11px; color: var(--t-dim); }
+  .doc-command { margin:0 0 10px;display:flex;flex-direction:column;gap:0; }
+  .doc-caption { font:inherit;color:var(--t-dim); }
   .doc-command code {
-    display: block; padding: 8px 10px; line-height: 1.5;
-    white-space: pre-wrap; word-break: break-word;
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--t-fg) 16%, var(--t-bg));
+    display:block;padding:0;line-height:inherit;
+    white-space:pre-wrap;word-break:break-word;box-shadow:none;
   }
-  .doc-list { margin: 0 0 12px; padding-left: 18px; }
-  .doc-list li { margin: 0 0 6px; font-size: 12.5px; line-height: 1.6; color: var(--t-fg); }
-  .doc-defs { margin: 0 0 12px; display: grid; grid-template-columns: minmax(90px, max-content) 1fr; gap: 6px 12px; }
-  .doc-defs dt { margin: 0; }
-  .doc-defs dd { margin: 0; font-size: 12.5px; line-height: 1.6; color: var(--t-fg); }
-  .doc-link { color: var(--t-blue); }
-  /* The picker is the app's own; it only needs the terminal's palette, since it
-     is living inside a terminal rather than inside a dialog. */
+  .doc-command code::before { content:"$ ";color:var(--t-green); }
+  .doc-list { margin:0 0 10px;padding-left:2ch;list-style-type:"- "; }
+  .doc-list li { margin:0 0 3px;font:inherit;color:var(--t-fg); }
+  .doc-defs {
+    margin:0 0 10px;display:grid;
+    grid-template-columns:minmax(90px,max-content) minmax(0,1fr);gap:3px 2ch;
+  }
+  .doc-defs dt, .doc-defs dd { margin:0;font:inherit;line-height:inherit; }
+  .doc-defs dd { color:var(--t-fg); }
+  .doc-link { color:var(--t-blue); }
+
   .doc-themes { margin: 4px 0 14px; }
   .doc-themes .field { margin-bottom: 0; }
-  .doc-themes label { display: block; margin-bottom: 6px; font-size: 11px; color: var(--t-dim); }
-  /* Repoint the picker's accent tokens at the TERMINAL palette; the picker
-     itself is unchanged, so its radio/roving-keyboard semantics come along. */
+  .doc-themes label { display:block;margin-bottom:6px;font:inherit;color:var(--t-dim); }
+
   .doc-themes .themes { --pick-accent: var(--t-ring); --pick-dash: var(--t-edge); }
-  /* Keep the workspace's patterned terminal surface during resize; only the
-     expensive terminal content disappears. */
+
   .resize-placeholder { display: block; }
   .resize-placeholder::after { content: none; }
-  /* NOTHING here reacts to :hover. An earlier pass reserved a gutter while the
-     chrome was up so output could not be struck through — but that reflowed
-     the text under the pointer, which in a terminal is unacceptable: a real
-     PTY's glyph grid does not move because a mouse crossed it. The control
-     floats OVER the top-right corner instead (opaque, tiny, one glyph). */
-  /* Column width is set inline from the longest entry, exactly like real `ls`
-     (which pads every column to the longest name + a 2-space gutter), so the
-     grid reflows to the pane instead of being pinned to a guessed width. */
+
+
   .ls { display: grid; column-gap: 2ch; }
   .ls > span { overflow: hidden; text-overflow: ellipsis; }
-  /* Steady, never blinking: a dozen panes each blinking on their own phase was
-     the single most distracting thing on screen. Real ttyd gets the same
-     treatment via `-t cursorBlink=false`. */
+
   .cursor {
     display: inline-block; width: 1ch; height: 1.15em; vertical-align: text-bottom;
     background: var(--t-cursor); opacity: .85;
   }
 
-  /* ---------- terminal skeleton (boot / reconnect placeholder) ---------- */
+
   .term.skeleton { display: flex; flex-direction: column; gap: 9px; padding-top: 13px; }
   .sk-line { height: 8px; border-radius: 4px; background: var(--t-skel); }
   .sk-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 9px; }
   .term-body { animation: term-in .22s ease-out both; }
 
-  /* ---------- pane chrome : ONE resting control ----------
-     Fades in place — it must never TRANSLATE, or the eye reads the movement as
-     the terminal shifting under it.
 
-     It floats OVER the corner rather than pushing text aside, so it does cover
-     whatever is under it while up. That is the lesser evil: reserving a gutter
-     reflows the grid (unacceptable), and the cost is bounded to one opaque 22px
-     glyph in the corner, on hover only.
-
-     Inset by 7px — more than the 2px ring plus the corner radius — so it sits
-     fully INSIDE the border with air around it. A radial scrim used to bleed
-     the pane background out to 56px here, which painted straight over the
-     top-right arc of the ring; the button's own opaque background does the same
-     job inside a box that cannot reach the edge. */
   .pane-hotspot { position:absolute; top:0; right:0; width:54px; height:54px; z-index:3; }
   .rail-pane {
     position: absolute; top: 7px; right: 7px; z-index: 4;
@@ -580,16 +440,13 @@
   .pico:focus-visible { outline: 2px solid var(--t-ring); outline-offset: 1px; opacity: 1; }
   .pico.danger:hover { background: color-mix(in srgb, var(--t-red) 30%, transparent); }
   .pico svg { width: 14px; height: 14px; }
-  /* persistence rides ON the single control instead of adding a second glyph */
+
   .pico.persist::after {
     content: ""; position: absolute; top: 1px; right: 1px;
     width: 5px; height: 5px; border-radius: 50%; background: var(--t-green);
   }
 
-  /* The one popup: settings · close, then a row of column-splits and a row of
-     row-splits. It is a SIBLING of the button rail, not a child — nested, it
-     inherited the rail's own 0→1 hover fade and rendered half-transparent with
-     terminal text showing through it. */
+
   .panepop {
     position: absolute; top: 36px; right: 7px; z-index: 5;
     display: grid; grid-template-columns: repeat(3, 26px); gap: 3px;
@@ -601,7 +458,7 @@
   .panepop .pico { width:26px;height:26px;opacity:.86; }
   .panepop .pico:disabled { visibility:hidden;pointer-events:none; }
   .panepop .row-end { grid-column: 3; }
-  /* a hairline between the two split axes, so the rows read as two choices */
+
   .panepop .axis-top { box-shadow: 0 -1px 0 var(--t-edge); padding-top: 4px; margin-top: 1px; }
 
   .empty-add { position: absolute; inset: 0; display: grid; place-items: center; }
@@ -613,21 +470,14 @@
   .empty-add .ico:hover { background: var(--stage-panel); color: var(--stage-accent); }
   .empty-add .ico svg { width: 20px; height: 20px; }
 
-  /* =========================================================================
-     ANIMATION — restrained, and entirely off under prefers-reduced-motion.
-     ========================================================================= */
+
   @keyframes term-in    { from { opacity: 0; } to { opacity: 1; } }
   @keyframes pop-in     { from { opacity: 0; transform: translateY(-4px) scale(.97); } }
   @keyframes pane-in    { from { opacity: 0; } }
   @keyframes pane-out   { to   { opacity: 0; } }
   @keyframes shimmer    { to   { opacity: .38; } }
 
-  /* A workspace switch is NOT animated. Every folder is already mounted, so
-     showing one is a paint, not a transition — a 260ms fade made switching
-     feel slower than the terminals it was decorating, and replayed a "boot"
-     for sessions that had been alive the whole time. Panes keep a short
-     opacity-only entrance: it changes no geometry, so terminal text never
-     moves. (An earlier scale() on .pane did move it, which is why it is gone.) */
+
   @media (prefers-reduced-motion: no-preference) {
     .pane { animation: pane-in .14s linear both; }
     .pane.closing { animation: pane-out .14s linear both; pointer-events: none; }
@@ -637,9 +487,7 @@
     .term-body, .panepop { animation: none; }
   }
 
-  /* =========================================================================
-     DIALOGS — the only place words are allowed outside a terminal.
-     ========================================================================= */
+
   dialog {
     width: min(520px, calc(100vw - 32px));
     padding: 0; border: 0; border-radius: 12px;
@@ -687,22 +535,12 @@
   .warn { color: var(--ui-warn); }
   .err { color: var(--danger); }
 
-  /* ---------- theme picker : swatches, not a <select> ----------
-     A dropdown hides every option behind a click and names colours in words.
-     These show the palette itself and apply on pick, so the terminal behind the
-     picker repaints as the pointer moves across it — the choice IS the preview.
-     Radio semantics (radiogroup + roving tabindex) so it is one tab stop with
-     arrow keys inside, exactly like the select it replaced. */
-  /* The picker's accent is declared by WHERE it lives, never inherited from
-     whichever theme is being previewed — otherwise picking a dark theme would
-     dim the very control you are using to pick it. */
+
+
   .themes { display: flex; flex-wrap: wrap; gap: 6px; --pick-accent: var(--ui-accent); --pick-dash: var(--ui-accent); }
   .themes.sm { gap: 4px; --pick-accent: var(--t-ring); --pick-dash: var(--t-edge); }
 
-  /* Each option is a MINIATURE TERMINAL: the theme's own background carrying a
-     few lines of its own accent colours. A colour NAME in a dropdown told the
-     user nothing; this is the thing itself at 1/40 scale, and picking it
-     repaints the real one behind the picker. */
+
   .theme-opt {
     display: flex; flex-direction: column; justify-content: center; gap: 2px;
     width: 44px; height: 30px; padding: 5px 6px;
@@ -714,35 +552,23 @@
   .theme-opt:hover { box-shadow: inset 0 0 0 1px var(--pick-accent); }
   .theme-opt:focus-visible { outline: 2px solid var(--pick-accent); outline-offset: 2px; }
   .theme-opt[aria-checked="true"] { box-shadow: inset 0 0 0 2px var(--pick-accent); }
-  /* the inherit option: the same chip, dashed, previewing what it inherits */
+
   .theme-opt.inherit { border: 1px dashed var(--pick-dash); }
 
-  /* Sized so all seven options (six themes + inherit) fit one row inside the
-     narrowest pane the layout allows: 7×28 + 6×4 = 220px, against 226px of
-     usable width in a 260px pane. */
+
   .themes.sm .theme-opt { width: 28px; height: 22px; padding: 4px; gap: 1.5px; border-radius: 4px; }
   .themes.sm .theme-opt i { height: 1.5px; }
   .themes.color-circles { gap:8px; }
   .themes.color-circles .theme-opt { width:22px;height:22px;padding:0;border-radius:50%;box-shadow:inset 0 0 0 1px var(--t-edge); }
   .themes.color-circles .theme-opt[aria-checked="true"] { box-shadow:0 0 0 2px var(--t-bg),0 0 0 4px var(--t-ring); }
 
-  /* ---------- pane settings : a popover ON the pane it configures ----------
-     Not a modal. A dialog dimmed the whole window to change one terminal, and
-     put the thing being configured behind a scrim while you configured it. This
-     sits in the pane's own corner, in the pane's own palette, so a theme pick
-     repaints the surface directly underneath the picker.
 
-     Inset like the rest of the chrome so it cannot touch the border, and capped
-     to the pane's box so a narrow pane scrolls it instead of overflowing. */
   .panesettings { width:min(440px,calc(100vw - 32px));background:var(--panel);color:var(--ink); }
   .ps-head { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
   .ps-title { flex: 1; font-size: 11px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--t-dim); }
   .ps-row { margin-bottom: 9px; }
   .ps-row:last-child { margin-bottom: 0; }
-  /* A CLASS, not a bare `label`. `.ps-row > label` (0,1,1) outranked `.ps-check`
-     (0,1,0), so the tmux row inherited the caption's uppercase, its dim colour
-     and `display:block` — the checkbox lost its flex row and its gap and the
-     control read as a disabled heading. Captions opt in by name now. */
+
   .ps-label { display: block; margin-bottom: 4px; font-size: 10.5px; letter-spacing: .05em; text-transform: uppercase; color: var(--t-dim); }
   .ps-input {
     width: 100%; padding: 6px 8px;
@@ -758,7 +584,7 @@
   .ps-note { margin: 4px 0 0; font-size: 10.5px; line-height: 1.45; color: var(--t-dim); }
   .ps-note.warn { color: var(--t-yellow); }
 
-  /* workspace icon picker */
+
   .iconpick {
     display: grid; grid-template-columns: repeat(12, 1fr); gap: 4px;
     max-height: 152px; overflow-y: auto;
@@ -779,13 +605,13 @@
   .btn { padding: 7px 13px; border: 1px solid var(--line); border-radius: 7px; background: var(--ui-field); color: var(--ink); font-size: 13px; font-weight: 550; }
   .btn:hover { background:var(--ui-hover); }
   .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-  /* white on --ui-accent measures 6.11:1 — AA for normal text, not just large */
+
   .btn.primary { border-color:var(--accent);background:var(--ui-active);color:var(--ui-selected-ink);box-shadow:inset 0 0 0 1px var(--accent); }
   .btn.primary:hover { background: var(--ui-hover); }
   .btn.ghost-danger { border-color: transparent; color: var(--danger); }
   .btn.ghost-danger:hover { background: var(--ui-hover); }
 
-  /* ---------- command palette ---------- */
+
   dialog.palette { width: min(580px, calc(100vw - 32px)); }
   .pal-input {
     width: 100%; padding: 14px 16px; border: 0; outline: none;
@@ -822,13 +648,12 @@
   .shortcut-row kbd { justify-self:start; }
   .shortcut-row span { font-size:12.5px;color:var(--ink); }
 
-/* v5: explicit globally themed chrome, workspace identity patterns, settings sheet */
 .rail-global { display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:6px;color:var(--ui-muted); }
 .rail-global:hover { background:var(--ui-hover);color:var(--ui-ink); }
 .rail-global:focus-visible { outline:2px solid var(--ui-accent); }
 .rail-global svg { width:15px;height:15px; }
 .term { font-size:var(--term-font-size,13px);font-weight:var(--term-font-weight,400); }
-/* Pattern is terminal-only and deliberately low-ink: workspace identity without color. */
+
 .term::before { content:"";position:absolute;inset:0;pointer-events:none;z-index:0; }
 .term-body { position:relative;z-index:1; }
 .pattern-dots::before { background-image:radial-gradient(var(--t-pattern) .65px,transparent .75px);background-size:13px 13px; }
@@ -858,7 +683,7 @@
 .weight-groups { display:grid;grid-template-columns:repeat(3,1fr);gap:5px; }
 .weight-groups button { height:38px;padding:4px 8px;border-radius:6px;background:var(--ui-field);box-shadow:inset 0 0 0 1px var(--ui-edge); }
 .weight-groups button.on { background:var(--ui-active);color:var(--ui-selected-ink);box-shadow:inset 0 0 0 2px var(--ui-accent); }
-/* Context menus are positioned inline; disable the corner default when left is supplied. */
+
 .panepop[style*="left"] { transform:none;animation:none; }
-/* 3px, high-contrast active indicator; color is optional pane preference. */
+
 .pane.focused .pane-edge { box-shadow:inset 0 0 0 3px var(--t-ring); }

@@ -1,29 +1,9 @@
 import React, { useEffect, useId, useRef } from 'react';
 
-/* =====================================================================
-   THE MODAL SYSTEM — one shell, one form, one footer.
-
-   Every overlay in this app used to author its own surface: its own <dialog>
-   wrapper, its own <h2>, its own close affordance (or none), its own padding
-   and its own footer row. They drifted, and the drift was visible — pane
-   settings read as a different product from folder settings because it was
-   built as a different component.
-
-   So there is now exactly ONE dialog implementation. `ModalShell` owns the
-   native element, the backdrop, Escape, backdrop-dismissal and focus
-   restoration. `ModalForm` composes it into the standard settings surface:
-   header, optional description, scrollable body, footer. A view supplies
-   FIELDS and ACTIONS — never geometry.
-
-   The palette is the one deliberate variant: it is a search surface, not a
-   form, so it uses the same shell with its own body. It is a variant of the
-   shell, not a second dialog.
-   ===================================================================== */
-
 interface ModalShellProps {
   open: boolean;
   onClose: () => void;
-  /* `false` for the first-run dialog: there is nothing to go back to. */
+
   dismissible?: boolean;
   className?: string;
   initialFocusRef?: React.RefObject<HTMLElement | null>;
@@ -55,20 +35,17 @@ export function ModalShell({ open, onClose, dismissible = true, className, initi
 
 interface ModalFormProps {
   title: string;
-  /* One line under the title. Views that need more say it in a field note. */
+
   description?: string;
-  /* Omitted when there is nowhere to dismiss to (first run). */
+
   onClose?: () => void;
   closeLabel?: string;
-  /* Extra class on the surface, for width/behaviour variants only. */
+
   variant?: string;
   children: React.ReactNode;
   actions?: React.ReactNode;
 }
 
-/* The standard settings surface. Note what a caller can NOT do here: it cannot
-   change the padding, the heading level, the close button's position or the
-   footer's alignment. That is the point. */
 export function ModalForm({ title, description, onClose, closeLabel, variant, children, actions }: ModalFormProps) {
   const titleId = useId();
   return (
@@ -93,8 +70,6 @@ export function ModalForm({ title, description, onClose, closeLabel, variant, ch
   );
 }
 
-/* The footer, in ONE order everywhere: destructive far left, then a spacer,
-   then secondary, then primary. Views hand over buttons, never placement. */
 export function ModalActions({ destructive, secondary, primary }: {
   destructive?: React.ReactNode;
   secondary?: React.ReactNode;
@@ -121,9 +96,6 @@ export function Button({ kind = 'default', onClick, disabled, children, ...rest 
   return <button type="button" className={cls} onClick={onClick} disabled={disabled} {...rest}>{children}</button>;
 }
 
-/* A labelled control. The label/­control/hint relationship — including the
-   generated id that ties them together — belongs here, so no view can ship a
-   control that is only visually labelled. */
 export function Field({ label, hint, hintTone, htmlFor, children }: {
   label: string;
   hint?: React.ReactNode;
@@ -140,9 +112,6 @@ export function Field({ label, hint, hintTone, htmlFor, children }: {
   );
 }
 
-/* A group of controls that are not a single input (icon grids, swatch
-   radiogroups, font sizes). Same caption treatment as Field, but the group is
-   labelled by the caption rather than by `for`. */
 export function FieldGroup({ label, hint, children }: {
   label: string;
   hint?: React.ReactNode;
@@ -158,10 +127,6 @@ export function FieldGroup({ label, hint, children }: {
   );
 }
 
-/* A checkbox is a ROW: box and words on one line, sharing a label element.
-   This shipped once as a dim uppercase caption because a view styled its own —
-   every assertion passed and only the screenshot showed it. There is one
-   implementation now. */
 export function CheckboxField({ label, checked, disabled, onChange, hint, hintTone }: {
   label: string;
   checked: boolean;

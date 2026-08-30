@@ -1,13 +1,4 @@
-/* Local, offline React declarations.
-
-   The build downloads pinned React UMD bundles and inlines them; nothing is
-   installed. Type-checking must not depend on the network either, so the small
-   surface this app actually uses is declared here instead of pulling
-   @types/react. Intrinsic element props are deliberately permissive (an index
-   signature) — the value we want from TypeScript here is our OWN domain
-   (config, layout tree, runtime union, modal props), not a second copy of the
-   DOM attribute table. Event objects, refs and hooks ARE typed precisely,
-   because that is where the real bugs were. */
+/* Local declarations keep strict type checks offline. */
 
 declare namespace React {
   type Key = string | number;
@@ -26,8 +17,7 @@ declare namespace React {
     key: Key | null;
   }
 
-  /* Style objects carry CSS custom properties throughout this app
-     (`--t-bg`, `--term-font-size`, …), so the index signature is required. */
+
   interface CSSProperties {
     [property: string]: string | number | undefined;
   }
@@ -78,9 +68,8 @@ declare namespace React {
 
   type EventHandler<E> = (event: E) => void;
 
-  /* Props shared by every intrinsic element. Handlers are typed against the
-     element the JSX tag actually produces, which is what makes
-     `e.currentTarget.offsetLeft` meaningful rather than `any`. */
+
+  /* Known handlers keep their element types. Other DOM attributes stay open. */
   interface HTMLProps<T> {
     key?: Key | null | undefined;
     ref?: Ref<T> | undefined;
@@ -104,13 +93,11 @@ declare namespace React {
     onFocus?: EventHandler<FocusEvent<T>> | undefined;
     onMouseEnter?: EventHandler<MouseEvent<T>> | undefined;
     onCancel?: EventHandler<SyntheticEvent<T>> | undefined;
-    /* Everything else this app hands to the DOM: aria-*, data-*, svg
-       geometry, `type`, `value`, `placeholder`, `role`, … */
+
     [attribute: string]: any;
   }
 
-  /* Fragment is used both as `<>…</>` and as `<React.Fragment key=…>`, so it
-     has to be callable to satisfy the JSX element-type check. */
+
   const Fragment: (props: { key?: Key | null; children?: ReactNode }) => ReactElement;
 
   function createElement(type: unknown, props?: unknown, ...children: unknown[]): ReactElement;
@@ -138,9 +125,6 @@ declare module 'react-dom/client' {
   export function createRoot(container: Element | DocumentFragment): Root;
 }
 
-/* Classic-runtime JSX. Named entries exist only so handlers on the elements
-   this app attaches behaviour to receive the right element type; everything
-   else falls through the index signature. */
 declare namespace JSX {
   type Element = React.ReactElement;
   interface ElementChildrenAttribute {
@@ -165,7 +149,7 @@ declare namespace JSX {
     span: React.HTMLProps<HTMLSpanElement>;
     strong: React.HTMLProps<HTMLElement>;
     textarea: React.HTMLProps<HTMLTextAreaElement>;
-    /* Unlisted tags (the icon SVG geometry, mostly) stay permissive. */
+
     [element: string]: any;
   }
 }

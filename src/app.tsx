@@ -10,19 +10,6 @@ import type {
 } from './types';
 import { APP_VERSION } from './version';
 
-/* =====================================================================
-   1. THEMES — a terminal palette is the pane's content surface, so these
-   stay dark by default; the app chrome around them is now DERIVED from
-   whichever theme is active (see chromeVars) so the whole window reads as
-   one surface. `paper` is here so a light terminal is a first-class choice.
-   ===================================================================== */
-/* EVERY colour below carries text, so every one of them is measured against
-   its own background at >= 4.5:1 (WCAG AA) — `dim` included. `dim` is what a
-   terminal spends on timestamps, byte counts, `ls -la` mode bits and inactive
-   log levels; the first cut of these palettes had it at 3.1-4.2:1 across all
-   six themes, which is precisely the text a tired user squints at. It is now
-   the palette's floor, not its exception. test.mjs recomputes the whole matrix
-   from this object and fails the run if anything drops below AA. */
 const THEMES: Record<string, Theme> = {
   night:  { label:'night', appearance:'dark', bg:'#11141c', fg:'#c8d1e4', dim:'#7682a1', cursor:'#7aa2f7', red:'#f7768e', green:'#9ece6a', yellow:'#e0af68', blue:'#7aa2f7', magenta:'#bb9af7', cyan:'#7dcfff', ui:{ canvas:'#272a31', sidebar:'#45474d', raised:'#2c2f36', field:'#20232a', hover:'#5d5f64', active:'#344a78', edge:'#7b7e85', text:'#f4f6fb', muted:'#d1d5df', danger:'#f7768e', warning:'#e0af68', success:'#9ece6a', focus:'#8bb3ff' } },
   ink:    { label:'ink', appearance:'dark', bg:'#0d0d0f', fg:'#d0d0d2', dim:'#7d7d83', cursor:'#d0d0d2', red:'#e05561', green:'#8cc265', yellow:'#d4b062', blue:'#61a6f2', magenta:'#c162de', cyan:'#56b6c2', ui:{ canvas:'#252527', sidebar:'#424244', raised:'#29292b', field:'#1d1d1f', hover:'#59595b', active:'#304b70', edge:'#77777a', text:'#f5f5f6', muted:'#d0d0d4', danger:'#f7768e', warning:'#e0af68', success:'#9ece6a', focus:'#78b7ff' } },
@@ -36,10 +23,6 @@ const THEMES: Record<string, Theme> = {
 };
 const THEME_KEYS = Object.keys(THEMES);
 
-/* The contrast maths, in the page, so the test measures THIS source of truth
-   instead of a copy that can drift out of step with it. */
-/* The active theme, resolved safely: an unknown key (a hand-edited backup, a
-   removed theme) falls back rather than handing `undefined` to the renderer. */
 const themeOf = (key: string | null | undefined): Theme => (key ? THEMES[key] : undefined) || THEMES.paper;
 
 const _rgb = (h: string) => { h = h.replace('#',''); return [0,2,4].map((i) => parseInt(h.slice(i,i+2),16)); };
@@ -50,17 +33,15 @@ const contrast = (a: string, b: string) => {
   const [hi, lo] = l1 > l2 ? [l1, l2] : [l2, l1];
   return (hi + 0.05) / (lo + 0.05);
 };
-/* Test seam: every theme colour that carries text, against its own bg. */
+
 window.__contrastAudit = () => {
   const TEXT: Array<keyof Theme & ('fg'|'dim'|'red'|'green'|'yellow'|'blue'|'magenta'|'cyan'|'cursor')> =
     ['fg','dim','red','green','yellow','blue','magenta','cyan','cursor'];
   const out: Array<{ theme: string; key: string; kind: string; ratio: number; min: number }> = [];
   for (const [name, t] of Object.entries(THEMES)) {
     TEXT.forEach((k) => out.push({ theme:name, key:k, kind:'text', ratio:+contrast(t[k], t.bg).toFixed(2), min:4.5 }));
-    // Explicit UI tokens are audited on the exact surfaces that carry them.
     out.push({ theme:name, key:'focus-ring', kind:'ui', ratio:+contrast(t.blue, t.bg).toFixed(2), min:3 });
-    /* Selection forces terminal-background ink onto solid theme blue. This
-       keeps selected ANSI colours from becoming unreadable and clears AA. */
+
     out.push({ theme:name, key:'terminal-selection', kind:'text', ratio:+contrast(t.bg, t.blue).toFixed(2), min:4.5 });
     out.push({ theme:name, key:'ui-text/sidebar', kind:'text', ratio:+contrast(t.ui.text, t.ui.sidebar).toFixed(2), min:4.5 });
     out.push({ theme:name, key:'ui-muted/sidebar', kind:'text', ratio:+contrast(t.ui.muted, t.ui.sidebar).toFixed(2), min:4.5 });
@@ -75,12 +56,6 @@ window.__contrastAudit = () => {
   return out;
 };
 
-/* A pane's own palette. Note --t-edge / --t-ring: the pane border and focus
-   ring are MIXED FROM THE PANE'S OWN COLOURS, so a paper pane gets a soft grey
-   hairline and a night pane a soft light one — no fixed app blue anywhere. */
-/* Deterministic, DOM-free terminal atmosphere. Grid index is the only identity
-   input, so the same layout always receives the same four soft-horizon fields.
-   Focus doubles colour from 4% to 8%; neither state adds a drop shadow. */
 const seededPane = (index: number, salt = 3) => {
   let x = (index + 1) * 2654435761 + salt * 1013904223;
   x ^= x >>> 16;
@@ -111,10 +86,9 @@ const paneGridIndex = (layout: LayoutNode | null, paneId: string): number => {
   };
   return Math.max(0, visit(layout));
 };
-/* The terminal panes retain their existing solid/patterned treatment. Only the
-   sidebar uses the finalized atmosphere, at its active 8% strength. */
+
 const sidebarAtmosphereVars = () => softHorizonBackground(0, true);
-/* Small verification seam: the shipping pure functions, not a test-side copy. */
+
 window.__terminalAtmosphere = { seededPane, softHorizonBackground, paneGridIndex, sidebarAtmosphereVars };
 
 const themeVars = (t: Theme): React.CSSProperties => ({
@@ -122,24 +96,13 @@ const themeVars = (t: Theme): React.CSSProperties => ({
   '--t-red': t.red, '--t-green': t.green, '--t-yellow': t.yellow,
   '--t-blue': t.blue, '--t-magenta': t.magenta, '--t-cyan': t.cyan,
   '--t-edge': 'color-mix(in srgb, ' + t.fg + ' 26%, ' + t.bg + ')',
-  /* The focus ring is the theme's blue at full strength: diluting it into the
-     background is what made "active" ambiguous. Every theme's blue clears 3:1
-     on its own bg (7.3-8.7 in practice) — asserted in the audit above. */
+
   '--t-ring': t.blue,
   '--t-skel': 'color-mix(in srgb, ' + t.fg + ' 12%, ' + t.bg + ')',
-  /* Workspace identity should be sensed, not read. Keep pattern ink only 5%
-     away from the terminal background; using foreground with opacity made a
-     second text-like layer that competed with real output. */
+
   '--t-pattern': 'color-mix(in srgb, ' + t.fg + ' 5%, ' + t.bg + ')',
 });
 
-/* Chrome derived from the ACTIVE theme. Since panes carry NO resting border,
-   this step is the only thing separating a terminal from the surface around
-   it — so it is doing real work and is measured, not guessed. At the old 8%
-   the terminal/stage ratio was ~1.17, which reads as one flat slab once the
-   hairline is gone; at 16% it is ~1.40, a clear edge that is still quiet
-   enough that six panes do not look like six cards on a contrasting mat.
-   test.mjs measures the RENDERED colours against a floor in every theme. */
 const chromeVars = (t: Theme): React.CSSProperties => ({
   ...themeVars(t),
   '--stage-bg': t.ui.canvas,
@@ -147,7 +110,7 @@ const chromeVars = (t: Theme): React.CSSProperties => ({
   '--stage-edge': t.ui.edge,
   '--stage-ink': t.ui.text,
   '--stage-accent': t.ui.focus,
-  /* Finalized rail: terminal base + pane-zero horizon + terminal text tokens. */
+
   '--ui-panel': t.bg,
   '--ui-panel-atmosphere': sidebarAtmosphereVars(),
   '--ui-raised': t.ui.raised,
@@ -169,11 +132,6 @@ const chromeVars = (t: Theme): React.CSSProperties => ({
   '--line': t.ui.edge, '--accent': t.ui.focus, '--danger': t.ui.danger,
 });
 
-/* =====================================================================
-   2. CONFIG — one JSON object, the whole app state, backup/restore-able.
-   v3 adds `ui` (rail width/open) and a per-folder `icon`; a v2 blob still
-   loads because validate rebuilds from scratch and defaults what is missing.
-   ===================================================================== */
 const STORE_KEY = 'ttyd-workspace-v2';
 const BG_KEY = 'ttyd-workspace-bg';
 const CONFIG_VERSION = 6;
@@ -183,23 +141,15 @@ const PATTERNS: PatternName[] = ['plain','dots','grid','diagonal','cross','waves
 const defaultPattern = (id: string): PatternName => PATTERNS[1 + (hash32(id) % (PATTERNS.length - 1))];
 const MIN_W = 260;   // a pane never renders narrower than this…
 const MIN_H = 140;   // …or shorter than this; the area scrolls instead.
-/* THE spacing token, read from the stylesheet rather than repeated here. The
-   layout maths reserves this much for every divider, and CSS paints exactly
-   this much for every gutter (page margin, sidebar channel, pane channel), so
-   there is one number and it cannot drift out of step with itself. */
+
 const GAP = (() => {
   const v = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--gap'));
   return Number.isFinite(v) && v > 0 ? v : 8;
 })();
 const FLOOR = 0.08;  // smallest share a slot may be dragged to (bounds canvas growth)
-/* A fresh rail is 176px. The row used to reserve a 42px column for the literal
-   “Alt+3” text and a further 30px for its menu button, which is what made 208
-   the smallest width a workspace name could survive; the shortcut column is
-   gone and the menu is an overlay, so the label now gets more room out of a
-   narrower rail. RAIL_MIN is unchanged, so every saved width still validates. */
+
 const RAIL_MIN = 148, RAIL_MAX = 420, RAIL_DEFAULT = 176;
-/* Collapsed width == the fixed icon track in the stylesheet (--rail-icon-col),
-   so a badge sits at the same x whether the rail is open or shut. */
+
 const RAIL_COLLAPSED = 52;
 
 const uid = (p: string) => p + Math.random().toString(36).slice(2, 9);
@@ -233,8 +183,6 @@ function defaultConfig(): Config {
   };
 }
 
-/* Restore input is UNTRUSTED: it arrives from a textarea or from localStorage,
-   so it enters as `unknown` and only becomes a Config by being rebuilt here. */
 function validateConfig(raw: unknown): ValidationResult {
   if (!raw || typeof raw !== 'object') return { ok: false, error: 'Not an object.' };
   const source = raw as { folders?: unknown; theme?: unknown; ui?: unknown };
@@ -302,9 +250,6 @@ const hasSavedConfig = () => {
   try { return !!localStorage.getItem(STORE_KEY); } catch { return false; }
 };
 
-/* Same-origin paths exactly follow vanilla ttyd, including --base-path. A
-   static host's /token will fail this shape check and stays in documentation
-   mode; file:// is classified without making a meaningless request. */
 const ttydEndpoints = (): TtydEndpoints => {
   const path = location.pathname.replace(/[/]+$/, '');
   return {
@@ -339,19 +284,12 @@ async function probeCapabilities(runtime: Runtime, timeout=5000): Promise<Capabi
   });
 }
 
-/* =====================================================================
-   3. LAYOUT TREE
-   ===================================================================== */
 const normalize = (sizes: number[]): number[] => {
   const clean = sizes.map((s) => (Number.isFinite(s) && s > 0 ? s : 0.0001));
   const sum = clean.reduce((a, b) => a + b, 0);
   return clean.map((s) => s / sum);
 };
 
-/* Minimum px box in which every leaf still meets MIN_W/MIN_H at the CURRENT
-   size fractions. For a columns split a child gets sizes[i]*(W-gaps), so the
-   parent needs W >= max(min_i / sizes[i]) + gaps. Overflow past the viewport is
-   what produces the scrollbars. */
 function nodeMin(node: LayoutNode | null): { w: number; h: number } {
   if (!node) return { w: MIN_W, h: MIN_H };
   if (node.type === 'pane') return { w: MIN_W, h: MIN_H };
@@ -380,20 +318,13 @@ const mapTree = (node: LayoutNode | null, fn: (node: LayoutNode) => LayoutNode):
   return node;
 };
 
-/* Split a leaf into `count` slots. The existing pane always becomes children[0]
-   — i.e. it keeps the leftmost column / topmost row. */
 const splitPane = (root: LayoutNode | null, paneId: string, axis: SplitAxis, count: number) =>
   mapTree(root, (n) => {
     if (n.type !== 'pane' || n.id !== paneId) return n;
-    // A new slot is a NEW SHELL, not a second copy of whatever the source pane
-    // happens to be running: cloning `npm run dev` into three panes would boot
-    // three dev servers on the same port. Fresh panes get `bash` (the command
-    // ttyd itself is started with) and never inherit `persist`.
     const extra = Array.from({ length: count - 1 }, () => pane('bash', false));
     return { type:'split', axis, sizes: equal(count), children: [n, ...extra] };
   });
 
-/* Remove a leaf; collapse a split that drops to a single child. */
 function removePane(node: LayoutNode | null, paneId: string): LayoutNode | null {
   if (!node) return null;
   if (node.type === 'pane') return node.id === paneId ? null : node;
@@ -421,14 +352,9 @@ const findPane = (node: LayoutNode | null, id: string | undefined): PaneNode | n
 const countPanes = (node: LayoutNode | null) => { let n = 0; eachPane(node, () => n++); return n; };
 const listPanes = (node: LayoutNode | null): PaneNode[] => { const out: PaneNode[] = []; eachPane(node, (p) => out.push(p)); return out; };
 
-/* =====================================================================
-   4. MOCK TERMINAL — the single seam ttyd replaces.
-   Returns rows of coloured spans so every palette entry is visible.
-   ===================================================================== */
 const hash32 = (s: string) => { let h = 2166136261 >>> 0; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; };
 const rng = (seed: number) => { let s = seed >>> 0; return () => { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; return s / 4294967296; }; };
 
-/* A mock row is a list of [text, colour-key] spans, or one `ls` grid. */
 type MockSpan = [string, string];
 type MockRow = { kind: 'row'; spans: MockSpan[]; cursor?: boolean } | { kind: 'ls'; items: MockSpan[] };
 
@@ -506,21 +432,12 @@ function mockTerminal({ folder, pane }: { folder: Folder; pane: PaneNode }): Moc
   return rows;
 }
 
-/* Documentation mode's config. It is a NORMAL config — same folders, same
-   layout tree, same panes — so every workspace behaviour (splits, menus,
-   themes, keyboard) is really working, not simulated. It is never written to
-   localStorage: `configured` stays false in this mode, which is what keeps a
-   real saved workspace from being overwritten by a visit to the website.
-
-   `directFile` no longer reorders anything: README is the landing page in both
-   static hosting and `file://`. */
 const docPane = (page: DocPage, section: number): PaneNode =>
   ({ type:'pane', id:'doc-' + page.id + '-' + section, command:'cat ' + page.id + '.txt', persist:false, docSection:section });
 
 const docLayout = (page: DocPage): LayoutNode => {
   if (page.layout === 'demo-split') {
-    /* Equal halves; the right half split into equal top and bottom panes. The
-       page describes this arrangement, so it has to BE this arrangement. */
+
     return { type:'split', axis:'columns', sizes:[0.5, 0.5], children:[
       docPane(page, 0),
       { type:'split', axis:'rows', sizes:[0.5, 0.5], children:[docPane(page, 1), docPane(page, 2)] },
@@ -543,10 +460,6 @@ const colorOf = (key: string) => (key === 'fg' ? 'var(--t-fg)' : key === 'dim' ?
 
 const REDUCED = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-/* A terminal shows a skeleton first, then its content. Today that stands in for
-   nothing; once this is ttyd it is the honest picture of a socket that has not
-   opened yet, so the shape is worth having now. Shell construction lives in
-   commands.js so settings values pass through one audited pure-function seam. */
 window.__shellCwd=shellCwd;
 window.__tmuxLaunchCommand=tmuxLaunchCommand;
 
@@ -557,12 +470,9 @@ const xtermAppearance = (element: HTMLElement) => {
     fontSize:parseFloat(css.getPropertyValue('--term-font-size'))||13,
     fontWeight:parseInt(css.getPropertyValue('--term-font-weight'))||400,
     theme:{
-      /* xterm's own opaque default background would cover .term::before and
-         hide the selected workspace pattern. Let the outer terminal surface
-         own the background while xterm paints only glyphs and selections. */
+
       background:'rgba(0,0,0,0)',foreground,cursor:value('--t-cursor'),cursorAccent:background,
-      /* Solid blue plus forced background-colour ink guarantees AA even when
-         the selected glyph originally used an arbitrary ANSI foreground. */
+
       selectionBackground:value('--t-blue'),
       selectionForeground:background,
       black:background,brightBlack:value('--t-dim'),white:foreground,brightWhite:foreground,
@@ -614,9 +524,7 @@ function RealTerminal({ folder, pane, runtime, suspended }: {
     const ro=new ResizeObserver(()=>{try{fit.fit()}catch{}});ro.observe(hostEl);client.current={term,fit,socket};
     return()=>{clearTimeout(toastTimer);hostEl.removeEventListener('paste',nativePaste);hostEl.removeEventListener('ttydterm-paste',menuPaste);hostEl.removeEventListener('ttydterm-focus',focusTerminal);ro.disconnect();input.dispose();resize.dispose();selection.dispose();socket.close(1000);term.dispose();client.current=null};
   },[folder.cwd,pane.id,pane.command,pane.persist,runtime.mode,runtime.mode==='ttyd'?runtime.token:null]);
-  /* xterm paints ANSI colours on its own canvas/DOM layers; CSS variables do
-     not reach those glyphs. Re-apply the active workspace palette and shared
-     font settings after every React render so existing sessions update live. */
+
   useLayoutEffect(()=>{
     if(!host.current||!client.current)return;
     const appearance=xtermAppearance(host.current);
@@ -629,19 +537,6 @@ function RealTerminal({ folder, pane, runtime, suspended }: {
   return <div className={'term xterm-term pattern-'+(folder.pattern||'plain')+(pane.persist?' tmux-terminal':'')+' connection-'+state+(suspended?' xterm-suspended':'')} aria-label={'Terminal '+state}><div className="xterm-host" ref={host}/>{state==='ready'?null:<div className="connection-state">{state}</div>}{toast?<div className="copy-toast" role="status">{toast}</div>:null}</div>;
 }
 
-/* =====================================================================
-   4b. DOCUMENTATION PANE — the second content kind a pane can hold.
-
-   A doc pane is still a terminal surface (same pattern, same palette, same
-   prompt line); what differs is that its body is rendered from the typed block
-   model in docs.ts instead of from canned mock rows. That is why paragraphs
-   can breathe, a command can be a real <code>, a link can be a real <a>, and
-   the theme picker can be the app's own accessible radio group.
-   ===================================================================== */
-
-/* Documentation is ephemeral React state, so the theme picker on the Themes
-   page needs a way to reach the workspace it lives in without every layer of
-   the split tree carrying a prop it has no other use for. */
 const DocThemeContext = React.createContext<((folderId: string, theme: string) => void) | null>(null);
 
 const DocInline = ({ spans }: { spans: DocSpan[] }) => (
@@ -682,10 +577,7 @@ function DocBlockView({ block, folder }: { block: DocBlock; folder: Folder }) {
     );
     case 'themes': return (
       <div className="doc-themes">
-        {/* The app's own picker, not a copy of it: same radiogroup, same roving
-            focus, same swatches. Choosing repaints THIS workspace immediately
-            and touches no other page — and, because documentation mode never
-            persists, nothing reaches localStorage. */}
+        {}
         <ThemeChoice label="Theme for this workspace" value={folder.theme}
                      onChange={(theme) => setDocTheme?.(folder.id, theme || 'night')} />
       </div>
@@ -722,9 +614,6 @@ function DocTerminal({ folder, page, section }: { folder: Folder; page: DocPage;
   );
 }
 
-/* Mock rendering owns its hooks in a dedicated component. The parent
-   dispatcher can then switch from probing/mock content to RealTerminal after
-   ttyd detection without changing the hook count of an existing component. */
 function MockTerminal({ folder, pane, suspended }: {
   folder: Folder;
   pane: PaneNode;
@@ -796,27 +685,19 @@ function Terminal({ folder, pane, runtime, suspended }: {
 }) {
   const page = folder.doc ? docPage(folder.doc) : null;
   const section = page ? page.sections[pane.docSection ?? 0] : null;
-  /* Documentation renders identically whether or not ttyd is present, and
-     never boots through a skeleton: there is no socket to wait for. */
+
   if (page && section) return <DocTerminal folder={folder} page={page} section={section} />;
   if (!folder.doc && runtime.mode === 'ttyd') return <RealTerminal folder={folder} pane={pane} runtime={runtime} suspended={suspended}/>;
   return <MockTerminal folder={folder} pane={pane} suspended={suspended}/>;
 }
 
-/* =====================================================================
-   5. ICONS — pictograms only; no text escapes a terminal.
-   ===================================================================== */
 const S = { fill:'none', stroke:'currentColor', strokeWidth:1.7, strokeLinecap:'round', strokeLinejoin:'round' };
 const svg = (name: string, body: React.ReactNode) => () => <svg viewBox="0 0 24 24" data-icon={name} {...S}>{body}</svg>;
 
 const Ico = {
   plus:  svg('plus', <path d="M12 5v14M5 12h14" />),
-  /* A real cog: a toothed ring, not the sun-with-rays that was here before. */
-  /* A cog drawn as a FILLED silhouette: an 8-tooth ring with the hub punched
-     out by evenodd. Two earlier attempts failed for the same reason — anything
-     built from lines RADIATING from a circle reads as a sun at 14px, which is
-     exactly the "brightness" glyph this replaced. The teeth have to be part of
-     the perimeter, not spokes attached to it. */
+
+
   gear: () => (
     <svg viewBox="0 0 24 24" data-icon="gear" fill="currentColor" fillRule="evenodd" clipRule="evenodd" stroke="none">
       <path d="M10.28 2.56A9.6 9.6 0 0 1 13.72 2.56L13.54 4.86A7.3 7.3 0 0 1 15.96 5.87L17.46 4.10A9.6 9.6 0 0 1 19.90 6.54L18.13 8.04A7.3 7.3 0 0 1 19.14 10.46L21.44 10.28A9.6 9.6 0 0 1 21.44 13.72L19.14 13.54A7.3 7.3 0 0 1 18.13 15.96L19.90 17.46A9.6 9.6 0 0 1 17.46 19.90L15.96 18.13A7.3 7.3 0 0 1 13.54 19.14L13.72 21.44A9.6 9.6 0 0 1 10.28 21.44L10.46 19.14A7.3 7.3 0 0 1 8.04 18.13L6.54 19.90A9.6 9.6 0 0 1 4.10 17.46L5.87 15.96A7.3 7.3 0 0 1 4.86 13.54L2.56 13.72A9.6 9.6 0 0 1 2.56 10.28L4.86 10.46A7.3 7.3 0 0 1 5.87 8.04L4.10 6.54A9.6 9.6 0 0 1 6.54 4.10L8.04 5.87A7.3 7.3 0 0 1 10.46 4.86ZM12 8.5A3.5 3.5 0 1 0 12 15.5A3.5 3.5 0 1 0 12 8.5Z" />
@@ -831,8 +712,6 @@ const Ico = {
   paste:svg('paste',<><path d="M9 5h6v3H9z"/><path d="M8 6H6v14h12V6h-2M9 12h6M9 16h5"/></>),
 };
 
-/* 36 workspace icons — enough that a real set of projects each gets a
-   distinguishable mark in the collapsed rail. */
 const WS_ICONS: Record<string, React.ReactElement> = {
   terminal: <><rect x="3.5" y="5" width="17" height="14" rx="2" /><path d="m7 10 2.6 2.2L7 14.4M12.8 15h4" /></>,
   code:     <path d="m9 8-4 4 4 4M15 8l4 4-4 4M13.4 5.5l-2.8 13" />,
@@ -885,7 +764,6 @@ const WsIcon = ({ name }: { name: string }) => (
   <svg viewBox="0 0 24 24" data-icon={name} {...S}>{WS_ICONS[name]}</svg>
 );
 
-/* count pictograms: a box divided into n slices along `axis` */
 function CountGlyph({ axis, n }: { axis: SplitAxis; n: number }) {
   const lines: React.ReactElement[] = [];
   for (let i = 1; i < n; i++) {
@@ -897,17 +775,9 @@ function CountGlyph({ axis, n }: { axis: SplitAxis; n: number }) {
   return <svg viewBox="0 0 24 24" data-icon={'split-' + axis + '-' + n} {...S}><rect x="3.5" y="4.5" width="17" height="15" rx="2" />{lines}</svg>;
 }
 
-/* =====================================================================
-   6. HASH ROUTES
-      #/f/:folderId · /settings · /pane/:paneId · #/new · #/backup · #/palette
-   ===================================================================== */
 const parseHash = () => location.hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent);
 const go = (...parts: string[]) => {
   const next = '#/' + parts.map(encodeURIComponent).join('/');
-  // Assigning an IDENTICAL hash fires no `hashchange`, so a listener-driven
-  // router would never re-read the URL and the view would freeze (this is how
-  // "Close" on a dialog became a no-op once anything else had already put that
-  // exact hash in the bar). Re-announce it instead of assigning.
   if (location.hash === next) dispatchEvent(new HashChangeEvent('hashchange'));
   else location.hash = next;
 };
@@ -922,11 +792,6 @@ function useRoute() {
   return parts;
 }
 
-/* =====================================================================
-   7. tmux probe — STUB. Later this rides ttyd's websocket (open /ws with
-   `arg=has-tmux`, read the reply). For now it resolves optimistically so the
-   persistence toggle can already show what it will show.
-   ===================================================================== */
 function useTmux(): TmuxState {
   const [tmux, setTmux] = useState<TmuxState>({ state: 'probing' });
   useEffect(() => {
@@ -936,11 +801,6 @@ function useTmux(): TmuxState {
   return tmux;
 }
 
-/* =====================================================================
-   8. PANES + SPLIT TREE
-   ===================================================================== */
-/* Where a pane's popup was opened from: the trigger button (anchored under it)
-   or a right-click (anchored at the pointer). */
 type PaneMenu = { source: 'trigger' | 'context'; x: number; y: number };
 interface FocusRequest { id: string; n?: number; nonce?: number }
 
@@ -970,8 +830,7 @@ function Pane({ node, folder, runtime, focused, closing, focusReq, resizing,
     return () => removeEventListener('pointerdown', off);
   }, [menu]);
 
-  /* The command palette hands focus to a specific terminal. Deferred a tick so
-     it lands after the dialog has actually closed. */
+
   useEffect(() => {
     if (!focusReq || focusReq.id !== node.id) return;
     const t = setTimeout(() => {
@@ -992,8 +851,7 @@ function Pane({ node, folder, runtime, focused, closing, focusReq, resizing,
       tabIndex={-1}
       onPointerDownCapture={onFocus}
       onFocus={onFocus}
-      /* The workspace owns right-click even in tmux panes. commands.js removes
-         tmux's MouseDown3Pane binding so the same gesture cannot open two menus. */
+
       onContextMenu={(e) => {
         e.preventDefault(); onFocus();
         const r = ref.current?.getBoundingClientRect();
@@ -1003,12 +861,10 @@ function Pane({ node, folder, runtime, focused, closing, focusReq, resizing,
     >
       <Terminal folder={folder} pane={node} runtime={runtime} suspended={resizing} />
 
-      {/* The border, as an overlay ABOVE the terminal: an inset shadow on the
-          pane would be painted under .term's background, and an outer one is
-          clipped by the slot/canvas/viewport chain. Same 2px in both states. */}
+      {}
       <div className="pane-edge" aria-hidden="true" />
 
-      {/* ONE resting control. Everything else lives in its popup. */}
+      {}
       <div className={'pane-hotspot' + (menu ? ' open' : '')} aria-hidden="true" />
       <div className={'rail-pane' + (menu ? ' open' : '')} onPointerDown={(e) => e.stopPropagation()}>
         <button className={'pico' + (node.persist ? ' persist' : '')}
@@ -1016,7 +872,6 @@ function Pane({ node, folder, runtime, focused, closing, focusReq, resizing,
                 aria-expanded={!!menu} aria-haspopup="menu"
                 onClick={(e) => { const x=e.currentTarget.offsetLeft,y=e.currentTarget.offsetTop+28;setMenu((v)=>v?null:{source:'trigger',x,y}); }}><Ico.menu /></button>
       </div>
-
 
       {menu ? (
         <div className="panepop" role="menu" tabIndex={-1}
@@ -1089,20 +944,12 @@ function Node({ node, folder, runtime, focusId, closingId, focusReq, resizing, o
   const kidMins = node.children.map(nodeMin);
   const gaps = (node.children.length - 1) * GAP;
 
-  /* The one clamp both input methods share, so a keyboard nudge can never
-     reach a size a drag would have refused (and vice versa). */
+
   const clampDelta = (i: number, delta: number, avail: number) => {
     const a0 = node.sizes[i], b0 = node.sizes[i + 1];
     const minA = (node.axis === 'columns' ? kidMins[i].w : kidMins[i].h) / avail;
     const minB = (node.axis === 'columns' ? kidMins[i + 1].w : kidMins[i + 1].h) / avail;
-    // Normal case: neither neighbour may cross its pixel minimum, so panes
-    // stop dead at MIN_W/MIN_H the way they do in a real multiplexer.
     let lo = minA - a0, hi = b0 - minB;
-    // Degenerate case: this subtree is the one FORCING the canvas width, so
-    // both neighbours already sit exactly on their minimum and the range above
-    // is empty — the divider would be frozen. Fall back to a share floor: the
-    // drag then widens the canvas (and the area scrolls further) instead of
-    // silently doing nothing.
     if (hi - lo < 0.01) { lo = FLOOR - a0; hi = b0 - FLOOR; }
     const d = Math.max(Math.min(delta, hi), lo);
     const next = node.sizes.slice();
@@ -1141,9 +988,7 @@ function Node({ node, folder, runtime, focusId, closingId, focusReq, resizing, o
     target.addEventListener('pointerup', up);
   };
 
-  /* A divider is a real control, so it is reachable and operable without a
-     pointer: arrows nudge (Shift = coarse), Home/End slam it to the limit the
-     same clamp would allow. */
+
   const onDividerKey = (i: number) => (e: React.KeyboardEvent<HTMLDivElement>) => {
     const horizontal = node.axis === 'columns';
     const dec = horizontal ? 'ArrowLeft' : 'ArrowUp';
@@ -1182,9 +1027,6 @@ function Node({ node, folder, runtime, focusId, closingId, focusReq, resizing, o
   );
 }
 
-/* One folder's surface. All folders stay MOUNTED (inactive ones hidden) so
-   terminals are never torn down on tab switch — the behaviour we need once
-   these are live ttyd sockets. */
 function Surface({ folder, runtime, active, focusId, closingId, focusReq, appResizing,
                    onFocus, onSplit, onClose, onResize, onAddFirst, onOpenSettings }: {
   folder: Folder;
@@ -1208,8 +1050,6 @@ function Surface({ folder, runtime, active, focusId, closingId, focusReq, appRes
   useLayoutEffect(() => {
     const el = viewport.current;
     if (!el) return;
-    // contentRect is already inside the viewport's padding, so the canvas can
-    // fill it exactly without the padding pushing a scrollbar into existence.
     const ro = new ResizeObserver(([entry]) => {
       const r = entry.contentRect;
       setBox({ w: r.width, h: r.height });
@@ -1245,30 +1085,11 @@ function Surface({ folder, runtime, active, focusId, closingId, focusReq, appRes
   );
 }
 
-/* =====================================================================
-   9. DIALOG VIEWS
-
-   Every one of these is now only CONTENT. The dialog element, the surface,
-   the header, the close button, the body and the footer geometry all live in
-   modal.tsx; a view below picks fields and actions and nothing else.
-   ===================================================================== */
-
-/* A swatch is a MINIATURE TERMINAL: the theme's own background with a few lines
-   of its own accents on it. Ragged widths so it reads as output, not as a
-   colour chart. */
 const SWATCH_LINES: Array<[keyof Theme & ('fg'|'blue'|'green'|'dim'), string]> =
   [['fg', '78%'], ['blue', '58%'], ['green', '88%'], ['dim', '44%']];
 const ThemeSwatch = ({ t }: { t: Theme }) =>
   <>{SWATCH_LINES.map(([c, w]) => <i key={c} style={{ background: t[c], width: w }} />)}</>;
 
-/* Themes as swatches, applied ON PICK — no Save, no dropdown. The value is
-   whatever is currently stored, so the control is a view of the live config and
-   the surface behind it has already repainted by the time the click lands.
-
-   `variant="term"` paints the picker in the pane's own palette (it lives inside
-   the terminal); the default paints it in the system palette (it lives in a
-   dialog). Either way the accent is passed in, never inherited from whichever
-   theme happens to be active. */
 function ThemeChoice({ label, value, onChange, folderTheme }: {
   label: string;
   value: string | null;
@@ -1280,7 +1101,7 @@ function ThemeChoice({ label, value, onChange, folderTheme }: {
   const keys: Array<string | null> = folderTheme ? [null, ...THEME_KEYS] : [...THEME_KEYS];
   const current = value || null;
 
-  /* One tab stop, arrows inside — the keyboard contract a <select> had. */
+
   const onKey = (e: React.KeyboardEvent<HTMLButtonElement>) => {
     const i = keys.indexOf(current);
     let next = null;
@@ -1291,7 +1112,6 @@ function ThemeChoice({ label, value, onChange, folderTheme }: {
     else return;
     e.preventDefault();
     onChange(next);
-    // keep focus on the option that is now checked
     requestAnimationFrame(() => ref.current?.querySelector<HTMLElement>('[aria-checked="true"]')?.focus());
   };
 
@@ -1321,11 +1141,6 @@ function ThemeChoice({ label, value, onChange, folderTheme }: {
 
 const initials = (label: string) => label.replace(/[^a-z0-9]+/gi, '').slice(0, 2) || '··';
 
-/* Folder settings. NOT a form to be submitted: every control writes straight
-   through, so the rail relabels and the terminals repaint under the dialog as
-   you type and click. `isNew` is the one exception — a folder that does not
-   exist yet has nothing to write through to, so that path keeps Create/Cancel
-   and edits a local draft. */
 function FolderDialog({ folder, isNew, onChange, onCreate, onDelete, onClose, canDelete }: {
   folder: Folder;
   isNew?: boolean;
@@ -1337,7 +1152,6 @@ function FolderDialog({ folder, isNew, onChange, onCreate, onDelete, onClose, ca
 }) {
   const [draft, setDraft] = useState<Folder>(folder);
   useEffect(() => setDraft(folder), [folder]);
-  // live mode writes through; draft mode (new folder) accumulates locally
   const put = (patch: Partial<Folder>) => { setDraft((d) => ({ ...d, ...patch })); if (!isNew) onChange?.(patch); };
   const nameId = useId(), cwdId = useId();
   const label = draft.name.trim() || draft.cwd.split('/').filter((s) => s && s !== '~').pop() || 'workspace';
@@ -1354,7 +1168,7 @@ function FolderDialog({ folder, isNew, onChange, onCreate, onDelete, onClose, ca
           secondary={isNew ? <Button onClick={onClose}>Cancel</Button> : null}
           primary={isNew
             ? <Button kind="primary" onClick={() => onCreate?.({ ...draft, name: draft.name.trim(), cwd: draft.cwd.trim() || '~' })}>Create</Button>
-            /* No Save: everything above already took effect. Close just closes. */
+
             : <Button kind="primary" onClick={onClose}>Done</Button>}
         />
       }
@@ -1364,16 +1178,16 @@ function FolderDialog({ folder, isNew, onChange, onCreate, onDelete, onClose, ca
                onChange={(e) => put({ cwd: e.target.value })} spellCheck="false" autoFocus
                onBlur={() => put({ cwd: draft.cwd.trim() || '~' })} placeholder="~/work/project" />
       </Field>
-      <Field label="Name — optional; falls back to the last segment of the working directory" htmlFor={nameId}>
+      <Field label="Name: optional; falls back to the last segment of the working directory" htmlFor={nameId}>
         <input id={nameId} type="text" value={draft.name}
                onChange={(e) => put({ name: e.target.value })}
                onBlur={() => put({ name: draft.name.trim() })}
                placeholder={draft.cwd.split('/').filter((s) => s && s !== '~').pop() || 'workspace'} />
       </Field>
-      <FieldGroup label={'Icon — shown when the sidebar is collapsed; without one it falls back to “' + initials(label) + '”'}>
+      <FieldGroup label={'Icon: shown when the sidebar is collapsed; without one it falls back to “' + initials(label) + '”'}>
         {(labelledBy) => (
           <div className="iconpick" role="group" aria-labelledby={labelledBy}>
-            <button type="button" className={draft.icon ? '' : 'on'} title="No icon — use initials"
+            <button type="button" className={draft.icon ? '' : 'on'} title="No icon: use initials"
                     aria-label="No icon, use initials" aria-pressed={!draft.icon}
                     onClick={() => put({ icon: null })}>{initials(label)}</button>
             {WS_ICON_KEYS.map((k) => (
@@ -1400,13 +1214,6 @@ function FolderDialog({ folder, isNew, onChange, onCreate, onDelete, onClose, ca
   );
 }
 
-/* Pane settings. Two controls — command and tmux — on the standard modal
-   surface, so it is the same object as folder and global settings rather than
-   a second settings idiom that happened to live somewhere else.
-
-   Every control writes through on change. There is no Save and no Cancel: the
-   command re-runs as you type, the marker flips as you tick. Closing is only
-   closing. */
 function PaneSettings({ node, folder, tmux, onChange, onClose }: {
   node: PaneNode;
   folder: Folder;
@@ -1417,10 +1224,7 @@ function PaneSettings({ node, folder, tmux, onChange, onClose }: {
   const cmdRef = useRef<HTMLInputElement | null>(null);
   const cmdId = useId();
 
-  /* Focus the command box WITHOUT scrolling. `autoFocus` let the browser scroll
-     the input into view, and when the canvas is wider than the viewport that
-     dragged every terminal on screen sideways — the whole workspace lurched
-     because a panel opened. */
+
   useEffect(() => {
     const id = setTimeout(() => cmdRef.current?.focus({ preventScroll: true }), 0);
     return () => clearTimeout(id);
@@ -1443,14 +1247,12 @@ function PaneSettings({ node, folder, tmux, onChange, onClose }: {
         hintTone={tmux.state === 'absent' ? 'warn' : 'default'}
         hint={tmux.state === 'present' ? 'Survives closing the tab.'
           : tmux.state === 'probing' ? 'Checking for tmux…'
-          : 'tmux not found — this pane dies with the tab.'}
+          : 'tmux not found: this pane dies with the tab.'}
       />
     </ModalForm>
   );
 }
 
-/* The banner shows and copies THE canonical command from commands.ts — the
-   same string the README, Using it and Security pages render. */
 function SetupNotice({mode,onRetry}: {mode: Runtime['mode']; onRetry: () => void}) {
   const [copied,setCopied]=useState(false), command=ttydLaunchCommand();
   return <div className="setup-notice" role="status"><strong>{mode==='file'?'Opened directly':'Demo mode'}</strong><span>{mode==='file'?'Browsers cannot start a shell. Launch this file with ttyd.':'This interactive guide is not connected to ttyd.'}</span><code>{command}</code><button onClick={()=>navigator.clipboard?.writeText(command).then(()=>setCopied(true))}>{copied?'Copied':'Copy launch command'}</button><button onClick={onRetry}>Retry ttyd</button></div>;
@@ -1465,7 +1267,7 @@ function FirstRunDialog({ capabilities, onProbe, onCreate }: {
   const cwdId = useId(), nameId = useId();
   useEffect(()=>{if(capabilities.state==='ready'){setCwd(capabilities.cwd||capabilities.home||'~');setName((capabilities.cwd||'home').split('/').filter(Boolean).pop()||'home');setPersist(!!capabilities.tmux)}},[capabilities.state]);
   return (
-    /* No close button: there is nothing behind this to go back to. */
+
     <ModalForm variant="first-run" title="Welcome to ttydterm"
                description="ttyd is connected. Check the shell, then create your first real workspace."
                actions={
@@ -1536,7 +1338,7 @@ function BackupDialog({ config, onRestore, onClose }: {
 
   const copy = async () => {
     try { await navigator.clipboard.writeText(text); setMsg({ ok: true, text: 'Copied to clipboard.' }); }
-    catch { setMsg({ ok: false, text: 'Clipboard blocked — select the text and copy manually.' }); }
+    catch { setMsg({ ok: false, text: 'Clipboard blocked: select the text and copy manually.' }); }
   };
   const restore = () => {
     let parsed: unknown;
@@ -1556,7 +1358,7 @@ function BackupDialog({ config, onRestore, onClose }: {
                    primary={<Button kind="primary" onClick={restore}>Restore</Button>}
                  />
                }>
-      <Field label="The entire workspace — folders, panes, splits, sizes, themes, sidebar width"
+      <Field label="The entire workspace: folders, panes, splits, sizes, themes, sidebar width"
              htmlFor={taId}
              hintTone={msg && !msg.ok ? 'error' : 'default'}
              hint={msg ? msg.text : 'Paste a saved copy over this and press Restore.'}>
@@ -1567,11 +1369,6 @@ function BackupDialog({ config, onRestore, onClose }: {
   );
 }
 
-/* ---------------------------------------------------------------------
-   Command palette. An overlay, so it is the one place besides a terminal
-   where words are allowed — and the only way to reach a specific pane
-   without hunting for it.
-   --------------------------------------------------------------------- */
 interface PaletteRow {
   kind: 'folder' | 'pane';
   key: string;
@@ -1610,7 +1407,6 @@ function CommandPalette({ folders, activeId, onPick, onClose, inputRef }: {
   const hits = useMemo(() => {
     const needle = q.trim().toLowerCase();
     if (!needle) {
-      // No query: the active workspace first, so ⌘K→Enter is a cheap "focus here".
       return rows.slice().sort((a, b) => Number(b.folder.id === activeId) - Number(a.folder.id === activeId));
     }
     return rows.filter((r) => needle.split(/\s+/).every((t) => r.hay.includes(t)));
@@ -1674,9 +1470,6 @@ function CommandPalette({ folders, activeId, onPick, onClose, inputRef }: {
   );
 }
 
-/* =====================================================================
-   10. APP
-   ===================================================================== */
 const folderLabel = (f: Folder) => f.name || f.cwd.split('/').filter((s: string) => s && s !== '~').pop() || 'workspace';
 
 function ShortcutsDialog({onClose}:{onClose:()=>void}) {
@@ -1711,18 +1504,14 @@ function App() {
   const folders = config.folders;
   const routedId = route[0] === 'f' ? route[1] : null;
 
-  /* `#/backup`, `#/new` and `#/palette` carry no folder id, but a workspace is
-     still on screen behind them. Remember the last folder actually routed to,
-     so those routes render over WHERE THE USER WAS instead of snapping back to
-     folders[0] — and so closing the dialog returns them there. */
+
   const [stickyId, setStickyId] = useState(routedId);
   const active = folders.find((f) => f.id === routedId)
               || folders.find((f) => f.id === stickyId)
               || folders[0];
   useEffect(() => { if (active) setStickyId(active.id); }, [active?.id]);
 
-  /* Chrome follows the active workspace's theme, and the chosen background is
-     remembered so the NEXT boot paints it before React runs. */
+
   if(!active) throw new Error('Configuration has no folders');
   const activeTheme = THEMES[active.theme] || THEMES.paper;
   useEffect(() => { document.documentElement.style.colorScheme = activeTheme.appearance; }, [activeTheme.appearance]);
@@ -1730,11 +1519,7 @@ function App() {
     try { localStorage.setItem(BG_KEY, String(chromeVars(activeTheme)['--stage-bg'])); } catch {}
   }, [activeTheme]);
 
-  /* URL is the source of truth for navigation; keep it honest on load. This
-     must ONLY normalise folder routes: rewriting the hash under `#/backup`,
-     `#/new` or `#/palette` stomped those routes to `#/f/<id>`, which both stole
-     the user's place AND wedged the dialog shut — "Close" then wrote the hash
-     that was already in the bar, firing no `hashchange`, so nothing re-rendered. */
+
   const ownsUrl = route[0] === 'backup' || route[0] === 'new' || route[0] === 'palette' || route[0] === 'settings' || route[0] === 'shortcuts';
   useEffect(() => {
     if (ownsUrl) return;
@@ -1758,16 +1543,12 @@ function App() {
       else if (k === 'k' || k === 'p') { e.preventDefault();e.stopPropagation();go('palette'); }
       else if (k === ',') { e.preventDefault();e.stopPropagation();go(e.shiftKey&&active?'f': 'settings', ...(e.shiftKey&&active?[active.id,'settings']:[])); }
     };
-    /* Capture before xterm/tmux can encode Alt+Arrow as terminal input. Only
-       recognized application shortcuts are stopped; paste stays native. */
+
     addEventListener('keydown',onKey,{capture:true});
     return()=>removeEventListener('keydown',onKey,{capture:true});
   }, [setRailOpen,folders,active,focusId,focusFolderPane]);
 
-  /* On a narrow screen a full rail leaves too little for a terminal that has
-     its own 260px minimum, so the rail collapses to its icon column there. This
-     fires only when the breakpoint is CROSSED, so a manual toggle survives
-     until the window genuinely changes class. */
+
   useEffect(() => {
     const mq = matchMedia('(max-width: 720px)');
     const apply = (e: MediaQueryList | MediaQueryListEvent) => setUi({ railOpen: !e.matches });
@@ -1780,10 +1561,7 @@ function App() {
     setConfig((c) => ({ ...c, folders: c.folders.map((f) => (f.id === id ? fn(f) : f)) }));
   }, []);
 
-  /* The Themes documentation page writes through here. It repaints that ONE
-     docs workspace in ephemeral React state; `configured` is false in
-     documentation mode, so the persistence effect above never runs and a real
-     saved workspace on this browser is left exactly as it was. */
+
   const setDocTheme = useCallback((folderId: string, theme: string) => {
     patchFolder(folderId, (f) => (f.doc ? { ...f, theme } : f));
   }, [patchFolder]);
@@ -1792,7 +1570,7 @@ function App() {
     patchFolder(active.id, (f) => ({ ...f, layout: splitPane(f.layout, paneId, axis, count) }));
   }, [active, patchFolder]);
 
-  /* Closing always asks first: a pane may own a live foreground process. */
+
   const commitClose = useCallback(() => {
     const paneId=confirmCloseId;if(!paneId)return;
     setConfirmCloseId(null);
@@ -1828,7 +1606,7 @@ function App() {
     });
   }, [active]);
 
-  /* ---- sidebar resize: pointer + keyboard, persisted in the config ---- */
+
   const railRef = useRef<HTMLElement | null>(null);
   const startRailDrag = (e: React.PointerEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -1857,9 +1635,7 @@ function App() {
     setUi({ railWidth: clamp(next, RAIL_MIN, RAIL_MAX) });
   };
 
-  /* routed overlays. The pane one is NOT a dialog any more — it renders inside
-     the pane itself — but it keeps its route, so a specific pane's settings
-     stay linkable and back/forward still work. */
+
   const routedPane = route[0] === 'f' && route[2] === 'pane' ? findPane(active?.layout, route[3]) : null;
   const showFolderDlg = route[0] === 'f' && route[2] === 'settings';
   const showNewDlg = route[0] === 'new';
@@ -1875,7 +1651,7 @@ function App() {
     if (!showNewDlg && newDraft) setNewDraft(null);
   }, [showNewDlg, newDraft]);
 
-  /* Live pane edit — one patch, straight into the config. No draft, no Save. */
+
   const onPaneChange = useCallback((paneId: string, patch: Partial<PaneNode>) => {
     patchFolder(active.id, (f) => ({
       ...f,
@@ -1888,18 +1664,14 @@ function App() {
     else focusFolderPane(row.folder);
   };
 
-  /* A workspace row. Its settings menu lives HERE, on the row it acts on — a
-     single global gear in the footer silently meant "the active folder", so
-     configuring any other workspace meant switching to it first. The menu is
-     absolutely overlaid rather than reserving a shortcut/action column, so the
-     label's geometry is identical hovered, focused, and open. */
+
   const FolderRow = ({ f, compact, index }: {f:Folder;compact:boolean;index:number}) => {
     const label = folderLabel(f);
     const [open,setOpen]=useState(false);
     useEffect(()=>{if(!open)return;const close=()=>setOpen(false);addEventListener('pointerdown',close);return()=>removeEventListener('pointerdown',close)},[open]);
     return (
       <div className={'folder' + (f.id === active.id ? ' active' : '')}
-           title={label + (index < 9 ? ' — Alt+' + (index + 1) : '')}>
+           title={label + (index < 9 ? ': Alt+' + (index + 1) : '')}>
         <button type="button" className="folder-main"
                 aria-current={f.id === active.id ? 'true' : undefined}
                 aria-keyshortcuts={index<9?'Alt+'+(index+1):undefined}
@@ -1912,16 +1684,11 @@ function App() {
           {compact ? null : <span className="folder-name">{label}</span>}
         </button>
         {compact ? null : (
-          /* An absolute overlay on the row's right edge, like the pane chrome:
-             revealed on hover, on focus-within, and while its own menu is open.
-             It reserves NO space in the row, so the workspace name's box is
-             identical in every one of those states — the shortcut text that
-             used to sit here in flow is gone entirely, and Alt+N is carried by
-             `aria-keyshortcuts`, the accessible name, and the row tooltip. */
+
           <span className={'folder-actions' + (open ? ' open' : '')}
                 onPointerDown={e=>e.stopPropagation()}
                 onKeyDown={(e)=>{if(e.key==='Escape'){e.preventDefault();e.stopPropagation();setOpen(false)}}}>
-            <button className="folder-act" title={'Workspace menu — '+label} aria-label={'Workspace menu for '+label} aria-haspopup="menu" aria-expanded={open}
+            <button className="folder-act" title={'Workspace menu: '+label} aria-label={'Workspace menu for '+label} aria-haspopup="menu" aria-expanded={open}
                     onClick={(e)=>{e.stopPropagation();setOpen(v=>!v)}}><Ico.menu /></button>
             {open?<span className="folder-menu" role="menu">
               <button role="menuitem" onClick={(e)=>{e.stopPropagation();setOpen(false);go('f',f.id,'settings')}}><Ico.gear/><span>Settings</span></button>
@@ -1937,23 +1704,13 @@ function App() {
     <DocThemeContext.Provider value={setDocTheme}>
     <div className="shell" data-appearance={activeTheme.appearance} data-version={APP_VERSION}
          style={{...chromeVars(activeTheme),'--term-font-size':ui.fontSize+'px','--term-font-weight':FONT_WEIGHTS.find(({key})=>key===ui.fontWeight)?.value||400}}>
-      {/* ONE rail in both states. Collapsing changes its WIDTH and nothing
-          else: same element, same children, same order, same fixed 52px icon
-          track — so no badge and no footer control moves by a pixel. (Swapping
-          in a separate "stub" element is what made every glyph jump: five
-          footer buttons in a row became two in a column.) */}
+      {}
       <nav className={'rail' + (railOpen ? '' : ' collapsed')} aria-label="Workspaces" ref={railRef}
            style={{ flexBasis: (railOpen ? ui.railWidth : RAIL_COLLAPSED) + 'px' }}>
-        {/* The product name, once, and the control that hides everything under
-            it. Collapsed, the toggle takes the icon track (they cannot both own
-            52px) — but nothing BELOW this row moves, which is the property the
-            rail is built to hold. */}
+        {}
         <div className="rail-head">
           {railOpen ? (
-            /* The wordmark and, directly under it, the release. The version sits
-               INSIDE the label column, which is the only thing collapsing
-               removes, so the fixed 52px icon track — and every badge below
-               it — is untouched in both rail states. */
+
             <span className="brand-block">
               <span className="brand-name">ttydterm</span>
               <span className="brand-version">v{APP_VERSION}</span>
@@ -1963,21 +1720,13 @@ function App() {
                   aria-label={railOpen ? 'Hide sidebar' : 'Show sidebar'} aria-expanded={railOpen}
                   onClick={() => setRailOpen(!railOpen)}><Ico.panel /></button>
         </div>
-        {/* `+` is the LAST ITEM OF THE LIST, not a footer button: it adds a row
-            to the thing directly above it, so it belongs to that list and
-            scrolls with it. In the footer it sat among app-wide actions and
-            read as one of them. It keeps the same fixed 52px icon track as
-            every workspace badge, so it lines up with them in both rail
-            states and stays put when the rail collapses. */}
+        {}
         <div className="rail-list">
           {folders.map((f,index) => <FolderRow key={f.id} f={f} index={index} compact={!railOpen} />)}
           <button className="ico add" title="New workspace" aria-label="New folder"
                   onClick={() => go('new')}><Ico.plus /></button>
         </div>
-        {/* App-wide actions, one row. Hidden entirely when collapsed — see the
-            note on .rail-foot: a 52px rail cannot hold a row, and stacking is
-            what used to move every glyph on screen. ⌘/Ctrl+K still opens the
-            palette with the rail shut. */}
+        {}
         <div className="rail-foot">
           <button className="ico" title="Keyboard shortcuts" aria-label="Keyboard shortcuts" onClick={()=>go('shortcuts')}><Ico.keyboard /></button>
           <button className="ico rail-global" title="Global settings" aria-label="Global settings" onClick={() => go('settings')}><Ico.gear /></button>
@@ -1988,10 +1737,7 @@ function App() {
         </div>
       </nav>
 
-      {/* The sidebar-to-stage gutter. ALWAYS rendered, so the channel is the
-          same --gap whether the rail is open or shut; only its resize
-          behaviour (and its separator semantics, which would be a lie without
-          it) is conditional. */}
+      {}
       <div className={'rail-gutter' + (railOpen ? ' resizable' : '')}
            onPointerDown={railOpen ? startRailDrag : undefined}
            onKeyDown={railOpen ? onRailKey : undefined}
@@ -2014,8 +1760,7 @@ function App() {
         ))}
       </main>
 
-      {/* Every overlay is the SAME shell. What differs between them is the
-          content and, for the palette, one body variant. */}
+      {}
       <ModalShell open={!!confirmCloseId} onClose={() => setConfirmCloseId(null)}>
         <ModalForm variant="confirm-close" title="Close terminal?"
                    description="This ends the pane's current terminal connection."

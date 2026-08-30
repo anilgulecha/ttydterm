@@ -1,6 +1,4 @@
-/* The xterm.js surface this app uses, as it arrives: UMD globals attached by
-   the inlined vendor bundles, not module imports. Declared locally for the same
-   reason as react.d.ts — type-checking stays offline and installs nothing. */
+/* Local declarations for the xterm.js globals bundled into index.html. */
 
 interface XtermThemeColors {
   background: string;
@@ -63,14 +61,10 @@ interface XtermFitAddon {
   fit(): void;
 }
 
-/* `var`, not `const`: only var-declared globals are reachable as
-   `globalThis.Terminal`, which is how the app reads them. */
 declare var Terminal: { new (options?: XtermOptions): XtermTerminal };
 declare var FitAddon: { FitAddon: { new (): XtermFitAddon } };
 declare var WebLinksAddon: { WebLinksAddon: { new (): unknown } } | undefined;
 
-/* Test seams the browser suite calls into. They are part of the contract with
-   test.mjs, so they are declared rather than cast away at each assignment. */
 interface Window {
   __contrastAudit?: () => Array<{ theme: string; key: string; kind: string; ratio: number; min: number }>;
   __terminalAtmosphere?: {

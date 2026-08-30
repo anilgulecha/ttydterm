@@ -1,11 +1,14 @@
 import React, { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { paneLaunchCommand, shellCwd, shellQuote, tmuxLaunchCommand } from './commands';
+import { paneLaunchCommand, shellCwd, tmuxLaunchCommand, ttydLaunchCommand } from './commands';
+import { DOC_PAGES, docPage } from './docs';
+import type { DocBlock, DocPage, DocSection, DocSpan } from './docs';
 import { Button, CheckboxField, Field, FieldGroup, ModalActions, ModalForm, ModalShell } from './modal';
 import type {
   Capabilities, Config, Folder, FontWeight, LayoutNode, PaneNode, PatternName, Runtime,
   SplitAxis, Theme, TmuxState, TtydEndpoints, UiState, ValidationResult,
 } from './types';
+import { APP_VERSION } from './version';
 
 /* =====================================================================
    1. THEMES — a terminal palette is the pane's content surface, so these
@@ -189,7 +192,12 @@ const GAP = (() => {
   return Number.isFinite(v) && v > 0 ? v : 8;
 })();
 const FLOOR = 0.08;  // smallest share a slot may be dragged to (bounds canvas growth)
-const RAIL_MIN = 148, RAIL_MAX = 420, RAIL_DEFAULT = 208;
+/* A fresh rail is 176px. The row used to reserve a 42px column for the literal
+   “Alt+3” text and a further 30px for its menu button, which is what made 208
+   the smallest width a workspace name could survive; the shortcut column is
+   gone and the menu is an overlay, so the label now gets more room out of a
+   narrower rail. RAIL_MIN is unchanged, so every saved width still validates. */
+const RAIL_MIN = 148, RAIL_MAX = 420, RAIL_DEFAULT = 176;
 /* Collapsed width == the fixed icon track in the stylesheet (--rail-icon-col),
    so a badge sits at the same x whether the rail is open or shut. */
 const RAIL_COLLAPSED = 52;
@@ -205,7 +213,7 @@ function defaultConfig(): Config {
     ui: { railWidth: RAIL_DEFAULT, railOpen: true, fontSize: 13, fontWeight:'regular' },
     folders: [
       {
-        id: 'f-jr', name: 'kalviumjr', cwd: '~/work/kalviumjr', icon: 'code', pattern: 'dots' as const, theme:'paper',
+        id: 'f-jr', name: 'kalviumjr', cwd: '~/work/kalviumjr', icon: 'code', pattern: 'dots' as const, theme:'night',
         layout: {
           type: 'split' as const, axis: 'columns' as const, sizes: [0.56, 0.44],
           children: [
@@ -216,7 +224,7 @@ function defaultConfig(): Config {
         },
       },
       {
-        id: 'f-infra', name: 'infra', cwd: '~/work/infra', icon: 'server', pattern: 'grid' as const, theme:'paper',
+        id: 'f-infra', name: 'infra', cwd: '~/work/infra', icon: 'server', pattern: 'grid' as const, theme:'ocean',
         layout: { type: 'split' as const, axis: 'rows' as const, sizes: [0.62, 0.38],
           children: [ pane('k9s', true), pane('journalctl -f', true) ] },
       },
@@ -477,54 +485,8 @@ function commandOutput(command: string, rand: () => number): MockSpan[][] | null
   return null;
 }
 
-/* Returns: [{ kind:'row'|'ls', spans|items }] */
-const DOCS: Record<string, MockSpan[]> = {
-  readme: [
-    ['ttydterm is a terminal workspace in one offline HTML file.', 'fg'],
-    ['Without ttyd, this page is its own interactive guide.', 'dim'],
-    ['With ttyd, every pane becomes a real writable terminal.', 'green'],
-    ['https://github.com/anilgulecha/ttydterm', 'cyan'],
-  ],
-  install: [
-    ['1. Save this page as ~/ttydterm.html', 'fg'],
-    ['2. Install vanilla ttyd using your package manager.', 'fg'],
-    ['3. Run the launch command shown in the Setup workspace.', 'fg'],
-    ['The default binds only to 127.0.0.1.', 'yellow'],
-  ],
-  setup: [
-    ['Browsers cannot start a local shell.', 'yellow'],
-    ['Open a terminal and run:', 'fg'],
-    ['ttyd -i 127.0.0.1 -p 7681 -W -a -O -I "$HOME/ttydterm.html" -t cursorBlink=false bash -l', 'cyan'],
-    ['Then open http://127.0.0.1:7681', 'green'],
-  ],
-  keyboard: [
-    ['Alt+1…9        switch workspace', 'fg'],
-    ['Alt+Arrow      focus neighbouring pane', 'fg'],
-    ['Ctrl/Cmd+K     search workspaces and panes', 'fg'],
-    ['Ctrl/Cmd+B     toggle sidebar', 'fg'],
-    ['Ctrl/Cmd+,     global settings', 'fg'],
-  ],
-  themes: [
-    ['Open Global settings with Ctrl/Cmd+,', 'fg'],
-    ['Choose from five dark and four accessible light themes.', 'fg'],
-    ['Font size and theme take effect immediately.', 'green'],
-  ],
-  security: [
-    ['Writable terminals are powerful.', 'yellow'],
-    ['Keep the default 127.0.0.1 interface for local use.', 'fg'],
-    ['If exposing ttyd, always use credentials and TLS.', 'red'],
-    ['Credentials are handled by ttyd/browser Basic Auth.', 'dim'],
-  ],
-};
-
 function mockTerminal({ folder, pane }: { folder: Folder; pane: PaneNode }): MockRow[] {
   const rand = rng(hash32(pane.id + folder.cwd));
-  if (folder.doc && DOCS[folder.doc]) {
-    const rows: MockRow[] = [{ kind:'row', spans:[['visitor@ttydterm', 'green'], [':', 'dim'], ['~/'+folder.doc, 'blue'], ['$ cat '+folder.doc+'.txt', 'fg']] }];
-    DOCS[folder.doc].forEach((spans) => rows.push({ kind:'row', spans:[spans] }));
-    rows.push({ kind:'row', spans:[['visitor@ttydterm', 'green'], [':', 'dim'], ['~/'+folder.doc, 'blue'], ['$ ', 'dim']], cursor:true });
-    return rows;
-  }
   const prompt = (cmd: string): MockRow => ({ kind:'row', spans: [
     ['anil', 'green'], ['@', 'dim'], ['fedora', 'green'], [':', 'dim'], [folder.cwd, 'blue'], ['$ ', 'dim'], [cmd, 'fg'],
   ]});
@@ -544,11 +506,38 @@ function mockTerminal({ folder, pane }: { folder: Folder; pane: PaneNode }): Moc
   return rows;
 }
 
-const documentationConfig = (directFile=false): Config => {
-  const docs: Array<[string, string, string, PatternName]> = [['readme','README','book','dots'],['install','Installation','archive','grid'],['setup','Setup','terminal','diagonal'],['keyboard','Keyboard','keyboard','cross'],['themes','Themes','palette','waves'],['security','Security','shield','bricks']];
-  if(directFile) docs.unshift(...docs.splice(docs.findIndex(([id])=>id==='setup'),1));
-  return {version:CONFIG_VERSION,ui:{railWidth:208,railOpen:true,fontSize:13,fontWeight:'regular'},folders:docs.map(([doc,name,icon,pattern])=>({id:'doc-'+doc,name,cwd:'~/'+doc,doc,icon:WS_ICONS[icon]?icon:null,pattern,theme:'paper',layout:pane('cat '+doc+'.txt',false)}))};
+/* Documentation mode's config. It is a NORMAL config — same folders, same
+   layout tree, same panes — so every workspace behaviour (splits, menus,
+   themes, keyboard) is really working, not simulated. It is never written to
+   localStorage: `configured` stays false in this mode, which is what keeps a
+   real saved workspace from being overwritten by a visit to the website.
+
+   `directFile` no longer reorders anything: README is the landing page in both
+   static hosting and `file://`. */
+const docPane = (page: DocPage, section: number): PaneNode =>
+  ({ type:'pane', id:'doc-' + page.id + '-' + section, command:'cat ' + page.id + '.txt', persist:false, docSection:section });
+
+const docLayout = (page: DocPage): LayoutNode => {
+  if (page.layout === 'demo-split') {
+    /* Equal halves; the right half split into equal top and bottom panes. The
+       page describes this arrangement, so it has to BE this arrangement. */
+    return { type:'split', axis:'columns', sizes:[0.5, 0.5], children:[
+      docPane(page, 0),
+      { type:'split', axis:'rows', sizes:[0.5, 0.5], children:[docPane(page, 1), docPane(page, 2)] },
+    ] };
+  }
+  return docPane(page, 0);
 };
+
+const documentationConfig = (): Config => ({
+  version: CONFIG_VERSION,
+  ui: { railWidth: RAIL_DEFAULT, railOpen: true, fontSize: 13, fontWeight: 'regular' },
+  folders: DOC_PAGES.map((page) => ({
+    id: 'doc-' + page.id, name: page.name, cwd: '~/' + page.id, doc: page.id,
+    icon: WS_ICONS[page.icon] ? page.icon : null, pattern: page.pattern, theme: page.theme,
+    layout: docLayout(page),
+  })),
+});
 
 const colorOf = (key: string) => (key === 'fg' ? 'var(--t-fg)' : key === 'dim' ? 'var(--t-dim)' : 'var(--t-' + key + ')');
 
@@ -626,8 +615,8 @@ function RealTerminal({ folder, pane, runtime, suspended }: {
     return()=>{clearTimeout(toastTimer);hostEl.removeEventListener('paste',nativePaste);hostEl.removeEventListener('ttydterm-paste',menuPaste);hostEl.removeEventListener('ttydterm-focus',focusTerminal);ro.disconnect();input.dispose();resize.dispose();selection.dispose();socket.close(1000);term.dispose();client.current=null};
   },[folder.cwd,pane.id,pane.command,pane.persist,runtime.mode,runtime.mode==='ttyd'?runtime.token:null]);
   /* xterm paints ANSI colours on its own canvas/DOM layers; CSS variables do
-     not reach those glyphs. Re-apply the complete app palette after every
-     React render so live global theme/font changes update existing sessions. */
+     not reach those glyphs. Re-apply the active workspace palette and shared
+     font settings after every React render so existing sessions update live. */
   useLayoutEffect(()=>{
     if(!host.current||!client.current)return;
     const appearance=xtermAppearance(host.current);
@@ -640,13 +629,107 @@ function RealTerminal({ folder, pane, runtime, suspended }: {
   return <div className={'term xterm-term pattern-'+(folder.pattern||'plain')+(pane.persist?' tmux-terminal':'')+' connection-'+state+(suspended?' xterm-suspended':'')} aria-label={'Terminal '+state}><div className="xterm-host" ref={host}/>{state==='ready'?null:<div className="connection-state">{state}</div>}{toast?<div className="copy-toast" role="status">{toast}</div>:null}</div>;
 }
 
-function Terminal({ folder, pane, runtime, suspended }: {
+/* =====================================================================
+   4b. DOCUMENTATION PANE — the second content kind a pane can hold.
+
+   A doc pane is still a terminal surface (same pattern, same palette, same
+   prompt line); what differs is that its body is rendered from the typed block
+   model in docs.ts instead of from canned mock rows. That is why paragraphs
+   can breathe, a command can be a real <code>, a link can be a real <a>, and
+   the theme picker can be the app's own accessible radio group.
+   ===================================================================== */
+
+/* Documentation is ephemeral React state, so the theme picker on the Themes
+   page needs a way to reach the workspace it lives in without every layer of
+   the split tree carrying a prop it has no other use for. */
+const DocThemeContext = React.createContext<((folderId: string, theme: string) => void) | null>(null);
+
+const DocInline = ({ spans }: { spans: DocSpan[] }) => (
+  <>{spans.map((span, i) => {
+    switch (span.kind) {
+      case 'text': return <React.Fragment key={i}>{span.text}</React.Fragment>;
+      case 'em': return <strong className="doc-em" key={i}>{span.text}</strong>;
+      case 'code': return <code className="doc-code" key={i}>{span.text}</code>;
+      case 'link': return (
+        <a className="term-link doc-link" key={i} href={span.href} target="_blank" rel="noopener noreferrer">{span.text}</a>
+      );
+    }
+  })}</>
+);
+
+function DocBlockView({ block, folder }: { block: DocBlock; folder: Folder }) {
+  const setDocTheme = React.useContext(DocThemeContext);
+  switch (block.kind) {
+    case 'lead': return <p className="doc-lead"><DocInline spans={block.spans} /></p>;
+    case 'para': return <p className="doc-para"><DocInline spans={block.spans} /></p>;
+    case 'heading': return <h3 className="doc-heading">{block.text}</h3>;
+    case 'command': return (
+      <div className="doc-command">
+        {block.caption ? <span className="doc-caption">{block.caption}</span> : null}
+        <code>{block.command}</code>
+      </div>
+    );
+    case 'list': return (
+      <ul className="doc-list">{block.items.map((item, i) => <li key={i}><DocInline spans={item} /></li>)}</ul>
+    );
+    case 'defs': return (
+      <dl className="doc-defs">{block.items.map((item) => (
+        <React.Fragment key={item.term}>
+          <dt><code>{item.term}</code></dt>
+          <dd>{item.detail}</dd>
+        </React.Fragment>
+      ))}</dl>
+    );
+    case 'themes': return (
+      <div className="doc-themes">
+        {/* The app's own picker, not a copy of it: same radiogroup, same roving
+            focus, same swatches. Choosing repaints THIS workspace immediately
+            and touches no other page — and, because documentation mode never
+            persists, nothing reaches localStorage. */}
+        <ThemeChoice label="Theme for this workspace" value={folder.theme}
+                     onChange={(theme) => setDocTheme?.(folder.id, theme || 'night')} />
+      </div>
+    );
+  }
+}
+
+function DocTerminal({ folder, page, section }: { folder: Folder; page: DocPage; section: DocSection }) {
+  const first = page.sections[0] === section;
+  return (
+    <div className={'term doc-term pattern-' + (folder.pattern || 'plain')} data-ready="1" data-doc={page.id}
+         role="region" aria-label={page.title + ' documentation'} tabIndex={0}>
+      <div className="term-body">
+        <span className="term-row">
+          <span style={{ color: colorOf('green') }}>visitor@ttydterm</span>
+          <span style={{ color: colorOf('dim') }}>:</span>
+          <span style={{ color: colorOf('blue') }}>~/{page.id}</span>
+          <span style={{ color: colorOf('dim') }}>$ </span>
+          <span style={{ color: colorOf('fg') }}>cat {page.id}.txt</span>
+        </span>
+        <div className="doc-body">
+          {first ? <h2 className="doc-title">{page.title}</h2> : null}
+          {section.blocks.map((block, i) => <DocBlockView key={i} block={block} folder={folder} />)}
+        </div>
+        <span className="term-row">
+          <span style={{ color: colorOf('green') }}>visitor@ttydterm</span>
+          <span style={{ color: colorOf('dim') }}>:</span>
+          <span style={{ color: colorOf('blue') }}>~/{page.id}</span>
+          <span style={{ color: colorOf('dim') }}>$ </span>
+          <i className="cursor" />
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/* Mock rendering owns its hooks in a dedicated component. The parent
+   dispatcher can then switch from probing/mock content to RealTerminal after
+   ttyd detection without changing the hook count of an existing component. */
+function MockTerminal({ folder, pane, suspended }: {
   folder: Folder;
   pane: PaneNode;
-  runtime: Runtime;
   suspended: boolean;
 }) {
-  if (!folder.doc && runtime?.mode === 'ttyd') return <RealTerminal folder={folder} pane={pane} runtime={runtime} suspended={suspended}/>;
   const rows = useMemo(() => mockTerminal({ folder, pane }), [folder.cwd, folder.doc, pane.id, pane.command]);
   const [ready, setReady] = useState(() => REDUCED());
   useEffect(() => {
@@ -705,6 +788,21 @@ function Terminal({ folder, pane, runtime, suspended }: {
   );
 }
 
+function Terminal({ folder, pane, runtime, suspended }: {
+  folder: Folder;
+  pane: PaneNode;
+  runtime: Runtime;
+  suspended: boolean;
+}) {
+  const page = folder.doc ? docPage(folder.doc) : null;
+  const section = page ? page.sections[pane.docSection ?? 0] : null;
+  /* Documentation renders identically whether or not ttyd is present, and
+     never boots through a skeleton: there is no socket to wait for. */
+  if (page && section) return <DocTerminal folder={folder} page={page} section={section} />;
+  if (!folder.doc && runtime.mode === 'ttyd') return <RealTerminal folder={folder} pane={pane} runtime={runtime} suspended={suspended}/>;
+  return <MockTerminal folder={folder} pane={pane} suspended={suspended}/>;
+}
+
 /* =====================================================================
    5. ICONS — pictograms only; no text escapes a terminal.
    ===================================================================== */
@@ -744,6 +842,7 @@ const WS_ICONS: Record<string, React.ReactElement> = {
   cloud:    <path d="M7.2 18.5h9.3a3.6 3.6 0 0 0 .4-7.18A5.1 5.1 0 0 0 7.4 10.2a4.1 4.1 0 0 0-.2 8.3z" />,
   globe:    <><circle cx="12" cy="12" r="8.2" /><path d="M3.8 12h16.4M12 3.8c2.1 2.3 3.2 5.2 3.2 8.2s-1.1 5.9-3.2 8.2c-2.1-2.3-3.2-5.2-3.2-8.2s1.1-5.9 3.2-8.2z" /></>,
   rocket:   <><path d="M12 3.2c2.9 2.2 4.4 5.2 4.4 8.4L12 15.6l-4.4-4c0-3.2 1.5-6.2 4.4-8.4z" /><path d="M7.6 12.6 5 14.4l1 3.2 2.6-1M16.4 12.6 19 14.4l-1 3.2-2.6-1" /><circle cx="12" cy="9.4" r="1.5" /></>,
+  keyboard: <><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M6 9h.01M9 9h.01M12 9h.01M15 9h.01M18 9h.01M7 12h.01M10 12h.01M13 12h.01M16 12h.01M7 15h10"/></>,
   bug:      <><path d="M8.5 9.5a3.5 3.5 0 0 1 7 0v4a3.5 3.5 0 0 1-7 0z" /><path d="M9.4 7.2 8 5.4M14.6 7.2 16 5.4M8.5 11H5M19 11h-3.5M8.5 14.5 5.6 16.4M15.5 14.5l2.9 1.9" /></>,
   flask:    <><path d="M9.6 3.5v5.2L5.3 17a2 2 0 0 0 1.8 3h9.8a2 2 0 0 0 1.8-3l-4.3-8.3V3.5" /><path d="M8.6 3.5h6.8M7.4 14.5h9.2" /></>,
   box:      <><path d="M12 3.6 20 8v8l-8 4.4L4 16V8z" /><path d="M4 8l8 4.4L20 8M12 12.4V20.4" /></>,
@@ -1350,12 +1449,10 @@ function PaneSettings({ node, folder, tmux, onChange, onClose }: {
   );
 }
 
-function launchCommand(settings: { port?: number; user?: string; password?: string } = {}) {
-  const port=settings.port||7681,user=settings.user||'user',credential=settings.password?` -c ${shellQuote(user+':'+settings.password)}`:'';
-  return `ttyd -i 127.0.0.1 -p ${port} -W -a -O${credential} -I "$HOME/ttydterm.html" -t cursorBlink=false bash -l`;
-}
+/* The banner shows and copies THE canonical command from commands.ts — the
+   same string the README, Using it and Security pages render. */
 function SetupNotice({mode,onRetry}: {mode: Runtime['mode']; onRetry: () => void}) {
-  const [copied,setCopied]=useState(false), command=launchCommand();
+  const [copied,setCopied]=useState(false), command=ttydLaunchCommand();
   return <div className="setup-notice" role="status"><strong>{mode==='file'?'Opened directly':'Demo mode'}</strong><span>{mode==='file'?'Browsers cannot start a shell. Launch this file with ttyd.':'This interactive guide is not connected to ttyd.'}</span><code>{command}</code><button onClick={()=>navigator.clipboard?.writeText(command).then(()=>setCopied(true))}>{copied?'Copied':'Copy launch command'}</button><button onClick={onRetry}>Retry ttyd</button></div>;
 }
 
@@ -1590,7 +1687,7 @@ function ShortcutsDialog({onClose}:{onClose:()=>void}) {
 function App() {
   const testMock = new URLSearchParams(location.search).has('mock');
   const [configured, setConfigured] = useState(() => testMock || hasSavedConfig());
-  const [config, setConfig] = useState<Config>(() => testMock ? loadConfig() : (hasSavedConfig() ? loadConfig() : documentationConfig(location.protocol==='file:')));
+  const [config, setConfig] = useState<Config>(() => testMock ? loadConfig() : (hasSavedConfig() ? loadConfig() : documentationConfig()));
   const [runtime, setRuntime] = useState<Runtime>(() => location.protocol==='file:' ? {mode:'file',reason:'Opened directly'} : {mode:'probing'});
   const [capabilities, setCapabilities] = useState<Capabilities>({state:'unknown',tmux:false,home:'~',cwd:'~'});
   const [focusId, setFocusId] = useState<string | null>(null);
@@ -1682,6 +1779,14 @@ function App() {
   const patchFolder = useCallback((id: string, fn: (folder:Folder)=>Folder) => {
     setConfig((c) => ({ ...c, folders: c.folders.map((f) => (f.id === id ? fn(f) : f)) }));
   }, []);
+
+  /* The Themes documentation page writes through here. It repaints that ONE
+     docs workspace in ephemeral React state; `configured` is false in
+     documentation mode, so the persistence effect above never runs and a real
+     saved workspace on this browser is left exactly as it was. */
+  const setDocTheme = useCallback((folderId: string, theme: string) => {
+    patchFolder(folderId, (f) => (f.doc ? { ...f, theme } : f));
+  }, [patchFolder]);
 
   const onSplit = useCallback((paneId: string, axis: SplitAxis, count: number) => {
     patchFolder(active.id, (f) => ({ ...f, layout: splitPane(f.layout, paneId, axis, count) }));
@@ -1783,32 +1888,39 @@ function App() {
     else focusFolderPane(row.folder);
   };
 
-  /* A workspace row. Its settings gear lives HERE, on the row it acts on — a
+  /* A workspace row. Its settings menu lives HERE, on the row it acts on — a
      single global gear in the footer silently meant "the active folder", so
-     configuring any other workspace meant switching to it first. Both actions
-     reserve their box permanently and only fade, so the row's geometry (and
-     the name's ellipsis point) is identical hovered or not. */
+     configuring any other workspace meant switching to it first. The menu is
+     absolutely overlaid rather than reserving a shortcut/action column, so the
+     label's geometry is identical hovered, focused, and open. */
   const FolderRow = ({ f, compact, index }: {f:Folder;compact:boolean;index:number}) => {
     const label = folderLabel(f);
     const [open,setOpen]=useState(false);
     useEffect(()=>{if(!open)return;const close=()=>setOpen(false);addEventListener('pointerdown',close);return()=>removeEventListener('pointerdown',close)},[open]);
     return (
       <div className={'folder' + (f.id === active.id ? ' active' : '')}
-           role="button" tabIndex={0}
-           title={compact ? label : undefined}
-           aria-current={f.id === active.id ? 'true' : undefined}
-           aria-keyshortcuts={index<9?'Alt+'+(index+1):undefined}
-           aria-label={(compact?label:'Workspace '+label)+(index<9?', Alt+'+(index+1):'')}
-           onClick={() => focusFolderPane(f)}
-           onDoubleClick={() => go('f', f.id, 'settings')}
-           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go('f', f.id); } }}>
-        <span className="folder-badge">
-          {f.icon ? <WsIcon name={f.icon} /> : initials(label)}
-        </span>
-        {compact ? null : <span className="folder-name">{label}</span>}
-        {compact||index>8?null:<span className="folder-shortcut" aria-hidden="true">Alt+{index+1}</span>}
+           title={label + (index < 9 ? ' — Alt+' + (index + 1) : '')}>
+        <button type="button" className="folder-main"
+                aria-current={f.id === active.id ? 'true' : undefined}
+                aria-keyshortcuts={index<9?'Alt+'+(index+1):undefined}
+                aria-label={(compact?label:'Workspace '+label)+(index<9?', Alt+'+(index+1):'')}
+                onClick={() => focusFolderPane(f)}
+                onDoubleClick={() => go('f', f.id, 'settings')}>
+          <span className="folder-badge">
+            {f.icon ? <WsIcon name={f.icon} /> : initials(label)}
+          </span>
+          {compact ? null : <span className="folder-name">{label}</span>}
+        </button>
         {compact ? null : (
-          <span className="folder-actions" onPointerDown={e=>e.stopPropagation()}>
+          /* An absolute overlay on the row's right edge, like the pane chrome:
+             revealed on hover, on focus-within, and while its own menu is open.
+             It reserves NO space in the row, so the workspace name's box is
+             identical in every one of those states — the shortcut text that
+             used to sit here in flow is gone entirely, and Alt+N is carried by
+             `aria-keyshortcuts`, the accessible name, and the row tooltip. */
+          <span className={'folder-actions' + (open ? ' open' : '')}
+                onPointerDown={e=>e.stopPropagation()}
+                onKeyDown={(e)=>{if(e.key==='Escape'){e.preventDefault();e.stopPropagation();setOpen(false)}}}>
             <button className="folder-act" title={'Workspace menu — '+label} aria-label={'Workspace menu for '+label} aria-haspopup="menu" aria-expanded={open}
                     onClick={(e)=>{e.stopPropagation();setOpen(v=>!v)}}><Ico.menu /></button>
             {open?<span className="folder-menu" role="menu">
@@ -1822,7 +1934,9 @@ function App() {
   };
 
   return (
-    <div className="shell" data-appearance={activeTheme.appearance} style={{...chromeVars(activeTheme),'--term-font-size':ui.fontSize+'px','--term-font-weight':FONT_WEIGHTS.find(({key})=>key===ui.fontWeight)?.value||400}}>
+    <DocThemeContext.Provider value={setDocTheme}>
+    <div className="shell" data-appearance={activeTheme.appearance} data-version={APP_VERSION}
+         style={{...chromeVars(activeTheme),'--term-font-size':ui.fontSize+'px','--term-font-weight':FONT_WEIGHTS.find(({key})=>key===ui.fontWeight)?.value||400}}>
       {/* ONE rail in both states. Collapsing changes its WIDTH and nothing
           else: same element, same children, same order, same fixed 52px icon
           track — so no badge and no footer control moves by a pixel. (Swapping
@@ -1835,7 +1949,16 @@ function App() {
             52px) — but nothing BELOW this row moves, which is the property the
             rail is built to hold. */}
         <div className="rail-head">
-          {railOpen ? <span className="brand-name">ttydterm</span> : null}
+          {railOpen ? (
+            /* The wordmark and, directly under it, the release. The version sits
+               INSIDE the label column, which is the only thing collapsing
+               removes, so the fixed 52px icon track — and every badge below
+               it — is untouched in both rail states. */
+            <span className="brand-block">
+              <span className="brand-name">ttydterm</span>
+              <span className="brand-version">v{APP_VERSION}</span>
+            </span>
+          ) : null}
           <button className="rail-toggle" title={(railOpen ? 'Hide' : 'Show') + ' sidebar (⌘/Ctrl+B)'}
                   aria-label={railOpen ? 'Hide sidebar' : 'Show sidebar'} aria-expanded={railOpen}
                   onClick={() => setRailOpen(!railOpen)}><Ico.panel /></button>
@@ -1958,6 +2081,7 @@ function App() {
       </ModalShell>
       <ModalShell open={showShortcuts} onClose={closeDialog}><ShortcutsDialog onClose={closeDialog}/></ModalShell>
     </div>
+    </DocThemeContext.Provider>
   );
 }
 

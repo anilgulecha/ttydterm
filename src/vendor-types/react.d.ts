@@ -37,6 +37,11 @@ declare namespace React {
   }
   type Ref<T> = RefObject<T | null> | ((instance: T | null) => void) | null;
 
+  interface Context<T> {
+    Provider: (props: { value: T; children?: ReactNode }) => ReactElement;
+    Consumer: (props: { children: (value: T) => ReactNode }) => ReactElement;
+  }
+
   interface SyntheticEvent<T = Element> {
     currentTarget: T;
     target: EventTarget & T;
@@ -110,6 +115,8 @@ declare namespace React {
 
   function createElement(type: unknown, props?: unknown, ...children: unknown[]): ReactElement;
 
+  function createContext<T>(defaultValue: T): Context<T>;
+  function useContext<T>(context: Context<T>): T;
   function useState<S>(initial: S | (() => S)): [S, (value: S | ((previous: S) => S)) => void];
   function useEffect(effect: () => void | (() => void), deps?: readonly unknown[]): void;
   function useLayoutEffect(effect: () => void | (() => void), deps?: readonly unknown[]): void;

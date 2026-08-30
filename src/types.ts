@@ -44,6 +44,10 @@ export interface PaneNode {
   id: string;
   command: string;
   persist: boolean;
+  /* Documentation workspaces only: which section of the page this pane shows.
+   * Absent on every real pane, and deliberately dropped by validateConfig —
+   * documentation is never restored from untrusted JSON. */
+  docSection?: number;
 }
 export type SplitAxis = 'columns' | 'rows';
 export interface SplitNode {
@@ -64,7 +68,8 @@ export interface Folder {
   icon: string | null;
   pattern: PatternName;
   layout: LayoutNode | null;
-  /* Documentation workspaces only: picks a canned transcript in mock mode. */
+  /* Documentation workspaces only: the id of the page this workspace renders
+   * (see docs.ts). Absent on every real workspace. */
   doc?: string;
 }
 

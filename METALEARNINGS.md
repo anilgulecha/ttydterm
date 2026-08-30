@@ -234,9 +234,10 @@ Generalized principles inferred from the feedback rounds, per
 
 32. **A control that belongs to a row belongs ON the row.** One gear in the
     footer silently meant "the active folder", so configuring any *other*
-    workspace meant switching to it first — a mode nobody asked for. Per-row
-    actions must reserve their space permanently and only fade in, so the row's
-    geometry (and the label's ellipsis point) is identical hovered or not.
+    workspace meant switching to it first — a mode nobody asked for. Keep row
+    geometry stable either by reserving a constant box or by absolutely
+    overlaying the action; measure the label before hover, focus, and menu-open
+    rather than assuming opacity alone prevents reflow.
 
 33. **"It still feels animated" is a report about a MECHANISM, not a duration.**
     Every animation on the workspace switch had already been deleted and the
@@ -396,3 +397,52 @@ Generalized principles inferred from the feedback rounds, per
     identify ttyd. Require the expected JSON token shape before mounting real
     terminal clients, and derive token/WebSocket paths exactly as upstream does
     so reverse-proxy base paths remain valid.
+
+53. **Documentation embedded in the product should exercise the real product
+    model.** A page about split layouts is much more trustworthy when it is an
+    actual split tree, and a theme guide should use the production radio group
+    and repaint the workspace live. Model rich docs as typed data and reuse the
+    same layout and control paths; otherwise documentation becomes a second,
+    drifting implementation of the feature it explains.
+
+54. **Security copy must distinguish independent boundaries.** Loopback binding,
+    WebSocket Origin checks, same-origin browser requests, Basic Auth, TLS,
+    shell quoting, and tmux continuity solve different problems. Naming one as
+    another (Origin as CORS, auth as injection prevention, tmux as reboot
+    persistence) gives confidence without protection. Generate command and flag
+    explanations from one source, remove unnecessary inputs, and state what
+    remains intentionally executable.
+
+55. **A semantic colour pair remains valid only while it remains the pair.** An
+    audited selected background and selected ink cleared AA, but a decorative
+    hover `color-mix()` changed only the background and broke contrast in several
+    themes. Prefer a non-colour-changing hover indicator—or audit the hover pair
+    separately—and measure rendered button text and focus indicators across the
+    complete theme sweep.
+
+56. **A static-mode regression needs a true static-mode browser context.** A
+    deterministic `?mock` route cannot prove documentation ordering, host
+    detection, banner contrast, or non-persistence. Use storage-isolated pages
+    without the mock flag, supply a wrong-shaped `/token` response to avoid an
+    expected 404 polluting console assertions, and separately preload a saved
+    real config to prove documentation does not replace it.
+
+57. **A component that dispatches between renderers should own no branch-only
+    hooks.** Runtime probing can render a mock terminal first and a real xterm
+    on the next commit; returning before hooks in the second branch changes the
+    hook count even though each branch looks internally valid. Put hooks inside
+    dedicated leaf components and keep the dispatcher hook-free, then test the
+    actual probing-to-connected transition rather than only its endpoints.
+
+58. **A clickable row with its own action menu is two sibling controls, not one
+    control containing another.** `role="button"` on the row made the absolutely
+    overlaid menu trigger a nested interactive descendant; bubbled Enter/Space
+    also let the row handler suppress the trigger's click. Use a real main
+    button beside the action button, and test keyboard open plus Escape close.
+
+59. **Scrollable prose needs a keyboard entry point and overlay clearance.** An
+    `overflow:auto` document with no focusable descendants is pointer-scrollable
+    but unreachable from the keyboard, while a persistent bottom banner can
+    hide the final lines even at maximum scroll. Give the region an accessible
+    name and tab stop, reserve bottom scroll padding for the overlay at each
+    responsive shape, and assert the final prompt clears the overlay.

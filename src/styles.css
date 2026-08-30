@@ -125,9 +125,22 @@
     height: 100%; color: var(--ui-accent);
   }
   .brand-mark svg { width: 17px; height: 17px; }
+  /* Wordmark plus release, stacked. The block keeps the head's FIXED 44px
+     height, so adding the version moved nothing below it, and it lives in the
+     label column, so the collapsed icon track is untouched. */
+  .brand-block {
+    flex: 1; min-width: 0; padding-left: 18px;
+    display: flex; flex-direction: column; justify-content: center; gap: 0;
+  }
   .brand-name {
-    flex: 1; min-width: 0;padding-left:18px;
+    min-width: 0;
     font-size: 16px; font-weight: 800; letter-spacing: .015em; color: var(--ui-ink);
+    line-height: 1.1;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .brand-version {
+    font: 10px var(--mono); letter-spacing: .04em; color: var(--ui-muted);
+    line-height: 1.3;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .rail-toggle {
@@ -143,7 +156,7 @@
   /* Collapsed: the label column is gone, so the toggle takes the icon track and
      the mark steps aside — they cannot both own the same 52px. Nothing BELOW
      the head moves, which is the property that matters. */
-  .rail.collapsed .brand-name { display: none; }
+  .rail.collapsed .brand-block { display: none; }
   .rail.collapsed .brand-mark { display: none; }
   .rail.collapsed .rail-toggle { flex: 0 0 var(--rail-icon-col); width: var(--rail-icon-col); margin-right: 0; border-radius: 0; }
 
@@ -164,7 +177,6 @@
     line-height: 1.3;
     color: var(--ui-muted);
     text-align: left;
-    cursor: pointer;
     /* NO transition. Selecting a workspace has to look instantaneous, and a
        120ms cross-fade on the row is read as the SWITCH being slow even when
        the surface behind it swapped in a single frame — the eye blames the
@@ -177,7 +189,11 @@
     content: ""; position: absolute; left: 0; top: 50%; transform: translateY(-50%);
     width: 3px; height: 18px; border-radius: 0 2px 2px 0; background: var(--ui-accent);
   }
-  .folder:focus-visible { outline: 2px solid var(--ui-accent); outline-offset: -2px; }
+  .folder-main {
+    display:flex;align-items:center;width:100%;height:100%;min-width:0;
+    color:inherit;text-align:left;cursor:pointer;
+  }
+  .folder-main:focus-visible { outline: 2px solid var(--ui-accent); outline-offset: -2px; }
 
   /* THE fixed track. Badge, gear and close all live in columns of a known
      width, so nothing reflows when the label column appears or disappears. */
@@ -189,27 +205,41 @@
     color: inherit;
   }
   .folder-badge svg { width: 16px; height: 16px; }
+  /* The label owns the whole label column. The action overlays its right edge
+     only while revealed; no shortcut or action clearance is reserved in flow. */
   .folder-name { flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
-  .folder-shortcut { flex:0 0 42px;text-align:right;font:10px var(--mono);opacity:0;color:inherit;transition:opacity .12s; }
-  .folder:hover .folder-shortcut,.folder:focus-within .folder-shortcut { opacity:.72; }
 
-  /* Per-row actions. They RESERVE their space permanently and only fade in, so
-     the row's geometry — and the name's box — is identical hovered or not. */
+  /* Per-row actions, as an ABSOLUTE OVERLAY on the row's right edge — the same
+     idiom as the pane chrome. It is out of flow, so it reserves nothing and can
+     never change where the name's box ends; it is revealed on hover, on
+     focus-within, and while its own menu is open. The trigger is opaque so the
+     label cannot read through it. */
   .folder-actions {
-    flex: 0 0 30px; display: flex; align-items: center; gap: 1px;position:relative;
-    padding-right: 5px; margin-left: 4px;
+    position: absolute; right: 5px; top: 50%; z-index: 18; transform: translateY(-50%);
+    display: flex; align-items: center; gap: 1px;
+    /* opacity + pointer-events, never `visibility`/`display`: a hidden-by-
+       visibility control cannot be focused, so Tab could never reach it and
+       `:focus-within` could never fire. This stays in the tab order. */
+    opacity: 0; pointer-events: none;
+    transition: opacity .12s;
   }
+  .folder:hover .folder-actions,
+  .folder:focus-within .folder-actions,
+  .folder-actions.open { opacity: 1; pointer-events: auto; }
   .folder-act {
     display: inline-flex; align-items: center; justify-content: center;
-    width: 24px; height: 24px; border-radius: 5px; color: inherit;
-    opacity: 0; transition: opacity .12s, background .12s, color .12s;
+    width: 24px; height: 24px; border-radius: 5px;
+    /* Opaque, and in the row's own ink, so it reads as part of the row rather
+       than as a hole punched in it. */
+    background: var(--ui-raised); color: var(--ui-ink);
+    box-shadow: 0 0 0 1px var(--ui-edge);
+    transition: background .12s, color .12s;
   }
   .folder-act svg { width: 13px; height: 13px; }
-  .folder:hover .folder-act, .folder:focus-within .folder-act { opacity: .78; }
-  .folder-act:hover { opacity: 1; background: var(--ui-hover); color: var(--ui-ink); }
-  .folder-act:focus-visible { opacity: 1; outline: 2px solid var(--ui-accent); outline-offset: 1px; }
+  .folder-act:hover { background: var(--ui-hover); color: var(--ui-ink); }
+  .folder-act:focus-visible { outline: 2px solid var(--ui-accent); outline-offset: 1px; }
   .folder-act.danger:hover { background: var(--ui-hover); color: var(--ui-danger); }
-  .folder-menu { position:absolute;z-index:18;right:5px;top:30px;display:grid;min-width:126px;padding:4px;border-radius:7px;background:var(--ui-raised);color:var(--ui-ink);box-shadow:0 10px 28px var(--ui-shadow),inset 0 0 0 1px var(--ui-edge); }
+  .folder-menu { position:absolute;z-index:18;right:0;top:22px;display:grid;min-width:126px;padding:4px;border-radius:7px;background:var(--ui-raised);color:var(--ui-ink);box-shadow:0 10px 28px var(--ui-shadow),inset 0 0 0 1px var(--ui-edge); }
   .folder-menu button { display:flex;align-items:center;gap:8px;padding:7px 8px;border-radius:5px;text-align:left;font-size:12px; }
   .folder-menu button:hover { background:var(--ui-hover); }
   .folder-menu button.danger { color:var(--ui-danger); }
@@ -394,15 +424,100 @@
   .xterm-suspended .xterm-host { visibility:hidden; }
   .connection-state { position:absolute;inset:0;display:grid;place-items:center;color:var(--t-dim);background:color-mix(in srgb,var(--t-bg) 88%,transparent);font:12px var(--mono); }
   .copy-toast { position:absolute;z-index:8;left:50%;bottom:12px;transform:translateX(-50%);padding:5px 9px;border-radius:6px;background:var(--t-fg);color:var(--t-bg);font:11px var(--sans);box-shadow:0 5px 16px color-mix(in srgb,var(--t-bg) 60%,transparent); }
-  .setup-notice { position:absolute;z-index:12;left:50%;bottom:18px;transform:translateX(-50%);display:flex;align-items:center;gap:8px;max-width:calc(100% - 36px);padding:8px 10px;border-radius:8px;background:var(--ui-raised);color:var(--ui-ink);box-shadow:0 8px 28px color-mix(in srgb,var(--t-bg) 60%,transparent),inset 0 0 0 1px var(--ui-edge);font:11px var(--sans); }
-  .setup-notice span { color:var(--ui-muted); }
+  .setup-notice {
+    position:absolute;z-index:12;left:50%;bottom:18px;transform:translateX(-50%);
+    display:grid;grid-template-columns:max-content minmax(150px,220px) minmax(220px,1fr) max-content max-content;
+    align-items:center;gap:8px;width:min(980px,calc(100% - 36px));padding:8px 10px;border-radius:8px;
+    background:var(--ui-raised);color:var(--ui-ink);
+    box-shadow:0 8px 28px color-mix(in srgb,var(--t-bg) 60%,transparent),inset 0 0 0 1px var(--ui-edge);
+    font:11px var(--sans);
+  }
+  .setup-notice { color:var(--ink); }
+  .setup-notice > span { color:var(--muted); }
   .setup-notice code { overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:38vw;padding:4px 6px;border-radius:4px;background:var(--ui-field);font-family:var(--mono); }
-  .setup-notice button { flex:0 0 auto;padding:5px 8px;border-radius:5px;background:var(--ui-active); }
+  /* The banner's actions sit on the theme's solid active fill, so they must
+     carry the ink CALCULATED to pair with it. Inheriting the banner's body ink
+     put --ui-ink on --ui-active — foreground text on a saturated blue — which
+     is the pairing the contrast audit exists to catch. */
+  .setup-notice button {
+    flex:0 0 auto;padding:5px 8px;border-radius:5px;
+    background:var(--ui-active);color:var(--ui-selected-ink);font-weight:600;
+  }
+  .setup-notice button:hover { box-shadow:inset 0 0 0 2px var(--ui-selected-ink); }
+  .setup-notice button:focus-visible { outline:2px solid var(--ui-accent);outline-offset:2px; }
   .first-run p { color:var(--ui-muted); }
   .tmux-first { display:flex;gap:8px;align-items:center;margin:12px 0;color:var(--ui-ink); }
-  @media(max-width:760px){.setup-notice{align-items:stretch;flex-direction:column}.setup-notice code{max-width:75vw}}
+  @media(max-width:1000px){
+    .setup-notice{grid-template-columns:max-content minmax(0,1fr) max-content max-content}
+    .setup-notice code{grid-column:1/-1;grid-row:2;max-width:none}
+  }
+  @media(max-width:760px){
+    .setup-notice{display:flex;align-items:stretch;flex-direction:column;width:auto}
+    .setup-notice code{max-width:75vw}
+  }
   .term-link { text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
   .term-link:hover { filter: brightness(1.25); }
+
+  /* ---------------------------------------------------------------
+     Documentation panes. Still a terminal surface — same palette, same
+     pattern, same prompt lines — but the body between the prompts is prose,
+     so it gets prose spacing. A doc page is longer than its pane, so this is
+     the one terminal surface that scrolls its own content.
+     --------------------------------------------------------------- */
+  .doc-term {
+    overflow-y:auto;overscroll-behavior:contain;
+    padding-bottom:72px;scroll-padding-bottom:72px;
+  }
+  /* These follow the base rule deliberately: the demo banner gains a second
+     grid row, then becomes a vertical stack, so its scroll clearance must win
+     the cascade at those widths. */
+  @media(max-width:1000px){
+    .doc-term{padding-bottom:108px;scroll-padding-bottom:108px}
+  }
+  @media(max-width:760px){
+    .doc-term{padding-bottom:220px;scroll-padding-bottom:220px}
+  }
+  .doc-body { margin: 10px 0 12px; max-width: 74ch; font-family: var(--sans); white-space: normal; }
+  .doc-title { margin: 0 0 10px; font-size: 15px; font-weight: 700; letter-spacing: .01em; color: var(--t-fg); }
+  /* The sentence the page is built around: bigger, and with real air above and
+     below it, so the page has an entry point instead of an even grey wall. */
+  .doc-lead {
+    margin: 14px 0 18px; padding: 12px 14px;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--t-fg) 6%, var(--t-bg));
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--t-fg) 16%, var(--t-bg));
+    font-size: 14.5px; line-height: 1.6; color: var(--t-fg);
+  }
+  .doc-para { margin: 0 0 12px; font-size: 12.5px; line-height: 1.65; color: var(--t-fg); }
+  .doc-heading { margin: 18px 0 8px; font-size: 12.5px; font-weight: 700; letter-spacing: .02em; color: var(--t-fg); }
+  .doc-em { font-weight: 700; color: var(--t-fg); }
+  .doc-code, .doc-command code, .doc-defs dt code {
+    font-family: var(--mono); font-size: 12px;
+    padding: 1px 5px; border-radius: 4px;
+    background: color-mix(in srgb, var(--t-fg) 10%, var(--t-bg));
+    color: var(--t-fg);
+  }
+  .doc-command { margin: 0 0 12px; display: flex; flex-direction: column; gap: 4px; }
+  .doc-caption { font-size: 11px; color: var(--t-dim); }
+  .doc-command code {
+    display: block; padding: 8px 10px; line-height: 1.5;
+    white-space: pre-wrap; word-break: break-word;
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--t-fg) 16%, var(--t-bg));
+  }
+  .doc-list { margin: 0 0 12px; padding-left: 18px; }
+  .doc-list li { margin: 0 0 6px; font-size: 12.5px; line-height: 1.6; color: var(--t-fg); }
+  .doc-defs { margin: 0 0 12px; display: grid; grid-template-columns: minmax(90px, max-content) 1fr; gap: 6px 12px; }
+  .doc-defs dt { margin: 0; }
+  .doc-defs dd { margin: 0; font-size: 12.5px; line-height: 1.6; color: var(--t-fg); }
+  .doc-link { color: var(--t-blue); }
+  /* The picker is the app's own; it only needs the terminal's palette, since it
+     is living inside a terminal rather than inside a dialog. */
+  .doc-themes { margin: 4px 0 14px; }
+  .doc-themes .field { margin-bottom: 0; }
+  .doc-themes label { display: block; margin-bottom: 6px; font-size: 11px; color: var(--t-dim); }
+  /* Repoint the picker's accent tokens at the TERMINAL palette; the picker
+     itself is unchanged, so its radio/roving-keyboard semantics come along. */
+  .doc-themes .themes { --pick-accent: var(--t-ring); --pick-dash: var(--t-edge); }
   /* Keep the workspace's patterned terminal surface during resize; only the
      expensive terminal content disappears. */
   .resize-placeholder { display: block; }

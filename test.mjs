@@ -88,6 +88,10 @@ await page.waitForSelector(LIVE_TERM, { timeout: 15000 });
 console.log('\nboot');
 ok('no console/page errors', errors.length === 0, errors.join(' | '));
 ok('hash route settled on a folder', /#\/f\//.test(page.url()), page.url());
+ok('release 1.0 is shown beneath the wordmark and exposed on the shell', await page.evaluate(() =>
+  document.querySelector('.brand-version')?.textContent === 'v1.0' &&
+  document.querySelector('.shell')?.getAttribute('data-version') === '1.0'));
+ok('fresh sidebar uses the compact 176px default', Math.abs((await page.locator('.rail').evaluate((el) => el.getBoundingClientRect().width)) - 176) < 1);
 
 const folderNames = await page.$$eval('.folder-name', (n) => n.map((e) => e.textContent));
 ok('sidebar lists 3 seeded folders', folderNames.length === 3, folderNames.join(','));
@@ -115,7 +119,7 @@ const stray = await page.evaluate(() => {
         const host = node.parentElement;
         if (host.closest('.term')) continue;          // terminal content is allowed
         if (host.closest('.folder')) continue;        // folder names are allowed
-        if (host.closest('.brand-name')) continue;    // the product name, once
+        if (host.closest('.brand-block')) continue;   // product name + release, once
         if (host.closest('dialog')) continue;         // overlays are allowed
         if (host.closest('.panesettings')) continue;  // ...including the pane popover
         out.push(host.className + ': ' + node.textContent.trim().slice(0, 40));
@@ -144,6 +148,18 @@ ok('the collapse control sits to the right of the brand', await page.evaluate(()
 
 ok('each workspace row uses one triple-dot menu control', await page.evaluate(() =>
   [...document.querySelectorAll('.folder')].every((row)=>row.querySelectorAll('.folder-act').length===1 && !!row.querySelector('.folder-act svg[data-icon="menu"]'))));
+ok('workspace shortcuts are tooltip and accessibility metadata, never a width-reserving label', await page.evaluate(() =>
+  document.querySelectorAll('.folder-shortcut').length === 0 &&
+  [...document.querySelectorAll('.folder')].every((row, index) => {
+    const main = row.querySelector('.folder-main');
+    return index > 8 || row.getAttribute('title')?.includes('Alt+' + (index + 1)) &&
+      main?.getAttribute('aria-keyshortcuts') === 'Alt+' + (index + 1);
+  })));
+ok('workspace rows do not nest the menu button inside another interactive control', await page.evaluate(() =>
+  [...document.querySelectorAll('.folder')].every((row) =>
+    !row.matches('button,[role="button"]') && row.querySelectorAll('.folder-main > button').length === 0)));
+ok('workspace menu action is an out-of-flow overlay', await page.evaluate(() =>
+  [...document.querySelectorAll('.folder-actions')].every((action) => getComputedStyle(action).position === 'absolute')));
 
 // A dozen panes each blinking on their own phase was the most distracting
 // thing on screen. Real ttyd gets `-t cursorBlink=false` for the same reason.
@@ -309,9 +325,11 @@ for (let i = 0; i < themedRows; i++) {
   const s = await readSurfaces();
   if (s) surfaceSteps.push(s);
 }
-// Theme is now intentionally GLOBAL: switching workspace must preserve paint.
-ok('all workspaces share the configured global theme',
-  new Set(surfaceSteps.map((s) => s.stage)).size === 1,
+// Theme belongs to the workspace. The seeded workspaces deliberately cover
+// dark, coloured-dark, and light palettes so this sweep cannot pass without
+// actually observing per-workspace paint.
+ok('workspaces retain distinct configured themes',
+  new Set(surfaceSteps.map((s) => s.stage)).size === surfaceSteps.length,
   surfaceSteps.map((s) => `${s.name}:[${s.stage}]`).join(' '));
 // 1.12 is roughly where a large-area step stops being visible on a decent
 // panel; every theme should clear it comfortably in both directions.
@@ -842,7 +860,17 @@ await page.screenshot({ path: `${SHOTS}/18-folder-row-hover.png` });
 const folderMenuSel = '.folder.active .folder-act[aria-label^="Workspace menu"]';
 ok('every workspace row carries one triple-dot menu',
   (await page.locator('.folder .folder-act[aria-label^="Workspace menu"]').count()) === 3);
-await page.locator(folderMenuSel).click();
+await page.locator(folderMenuSel).focus();
+await page.keyboard.press('Enter');
+ok('workspace menu opens from its keyboard trigger',
+  (await page.locator('.folder.active .folder-menu').count()) === 1);
+await page.keyboard.press('Escape');
+ok('Escape closes the workspace menu and returns to its trigger',
+  (await page.locator('.folder.active .folder-menu').count()) === 0 && await page.evaluate(() => document.activeElement?.classList.contains('folder-act')));
+await page.keyboard.press('Space');
+const rowOpen = await boxOf(page, '.folder.active .folder-name');
+ok('opening the overlaid workspace menu does not resize the workspace name', sameBox(rowRest, rowOpen),
+  JSON.stringify(rowRest) + ' -> ' + JSON.stringify(rowOpen));
 ok('workspace menu offers settings and close',
   (await page.locator('.folder.active .folder-menu [role="menuitem"]').count()) === 2);
 await page.locator('.folder.active .folder-menu [role="menuitem"]', {hasText:'Settings'}).click();
@@ -1195,10 +1223,10 @@ ok('every glyph actually painted on screen clears its minimum', renderedFails.le
   renderedFails.slice(0, 5).map((f) => `"${f.txt}"=${f.r}`).join(', '));
 ok('rendered audit inspected real text', rendered.length > 20, rendered.length + ' spans');
 
-// ---------------------------------------------------- global terminal theme
-// The rail, stage and terminals all derive from one configured accessible
-// palette; switching workspaces does not repaint them.
-console.log('\nglobal terminal theme');
+// ---------------------------------------------- per-workspace terminal themes
+// Chrome follows the active workspace, and every workspace retains its own
+// accessible palette.
+console.log('\nper-workspace terminal themes');
 // Sample by ROW STATE, not by position: the active row moves when the workspace
 // changes, so `.folder-name` first would compare an active label in one theme
 // against an inactive one in the other and "prove" a difference that is only
@@ -1223,9 +1251,9 @@ const railPaper = await railLook();
 const stagePaper = await page.locator('.shell').evaluate((el) => getComputedStyle(el).backgroundColor);
 
 const railDiff = Object.keys(railNight).filter((k) => railNight[k] !== railPaper[k]);
-ok('the sidebar does not repaint when switching workspaces', railDiff.length === 0,
+ok('the sidebar repaints from the active workspace theme', railDiff.length >= 4,
   railDiff.map((k) => `${k}: ${railNight[k]} vs ${railPaper[k]}`).join(' | '));
-ok('the stage keeps the global theme when switching workspaces', stageNight === stagePaper,
+ok('the stage repaints from the active workspace theme', stageNight !== stagePaper,
   `${stageNight} vs ${stagePaper}`);
 // The FOCUS RING is the pane's only border now, and it is still mixed from the
 // pane's own palette rather than a fixed app blue — so a paper pane rings in
@@ -1237,12 +1265,11 @@ await page.locator('.folder').first().click();
 await page.waitForTimeout(260);
 const nightRing = await page.locator('.surface:not([hidden]) .pane').first()
   .evaluate((el) => getComputedStyle(el).getPropertyValue('--t-ring').trim());
-ok('pane border colour is independent of workspace switching', nightRing === paperRing && !!nightRing,
+ok('pane border colour follows each workspace theme', nightRing !== paperRing && !!nightRing && !!paperRing,
   `${nightRing} vs ${paperRing}`);
-// NB: taken after switching BACK to the dark folder, so this frame shows the
-// dark stage under the fixed system rail. The light half of the comparison is
+// Taken after switching back to the dark folder; the light comparison is
 // `09-deeplink-paper.png`.
-await page.screenshot({ path: `${SHOTS}/15-system-rail-vs-theme.png` });
+await page.screenshot({ path: `${SHOTS}/15-per-workspace-theme.png` });
 
 // ------------------------------------------------- switching is instantaneous
 // Every folder is already mounted, so showing one is a PAINT, not a transition.
@@ -1276,11 +1303,27 @@ ok('inactive surfaces keep their box (never display:none)',
 
 // measured, not inferred: no animation may be RUNNING on the panes just after
 // a switch. `currentTime` near zero means it started with the switch.
-await page.evaluate(() => { window.__sawSkeleton = false; });
-const t0 = Date.now();
+await page.evaluate(() => {
+  window.__sawSkeleton = false;
+  const target = document.querySelectorAll('.folder-main')[1];
+  const current = document.querySelector('.surface:not([hidden])');
+  const root = document.documentElement;
+  delete root.dataset.switchStarted;
+  delete root.dataset.switchFinished;
+  target?.addEventListener('click', () => { root.dataset.switchStarted = String(performance.now()); }, { capture:true, once:true });
+  const observer = new MutationObserver(() => {
+    if (document.querySelector('.surface:not([hidden])') !== current && root.dataset.switchStarted) {
+      root.dataset.switchFinished = String(performance.now());
+      observer.disconnect();
+    }
+  });
+  const stage = document.querySelector('.stage');
+  if (stage) observer.observe(stage, { attributes:true, subtree:true, attributeFilter:['hidden'] });
+});
 await page.locator('.folder').nth(1).click();
 await page.waitForSelector('.surface:not([hidden]) .term[data-ready="1"]', { timeout: 3000 });
-const switchMs = Date.now() - t0;
+const switchMs = await page.evaluate(() =>
+  Number(document.documentElement.dataset.switchFinished) - Number(document.documentElement.dataset.switchStarted));
 const replayed = await page.evaluate(() =>
   [...document.querySelectorAll('.surface:not([hidden]) .pane')]
     .flatMap((p) => p.getAnimations({ subtree: true }))
@@ -1289,7 +1332,7 @@ const replayed = await page.evaluate(() =>
 ok('switching replays no animation on the arriving panes', replayed.length === 0, replayed.join(', '));
 ok('switching does not replay the boot skeleton',
   (await page.evaluate(() => window.__sawSkeleton)) === false);
-ok('the target surface is on screen in one frame', switchMs < 250, switchMs + 'ms');
+ok('the target surface is on screen in the switching render', Number.isFinite(switchMs) && switchMs < 100, switchMs + 'ms');
 ok('the previous folder is still mounted behind it',
   (await page.locator('.pane').count()) > (await page.locator('.surface:not([hidden]) .pane').count()));
 
@@ -1330,6 +1373,235 @@ await page.waitForSelector(LIVE_TERM);
 const notesTheme = await page.locator(LIVE_TERM).first().evaluate((e) => getComputedStyle(e).backgroundColor);
 ok('deep link preserves the folder theme', notesTheme === 'rgb(251, 250, 246)', notesTheme);
 await page.screenshot({ path: `${SHOTS}/09-deeplink-paper.png` });
+
+// ======================================================= STATIC DOCUMENTATION
+// The normal suite uses ?mock=1 to exercise writable-workspace behavior. A
+// separate storage-isolated context loads the real static-hosting path, where
+// /token is absent and the same artifact becomes its documentation.
+console.log('\nstatic documentation + demo banner');
+const demoContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+const demo = await demoContext.newPage();
+/* A static host normally returns 404 for /token; fulfill a valid HTTP response
+   with the wrong protocol shape so runtime detection still chooses demo mode
+   without Chromium logging an expected failed-resource error. */
+await demo.route('**/token', (route) => route.fulfill({ status:200, contentType:'application/json', body:'{}' }));
+const demoErrors = [];
+demo.on('console', (m) => { if (m.type() === 'error') demoErrors.push(m.text()); });
+demo.on('pageerror', (e) => demoErrors.push(String(e)));
+await demo.goto(RAW_BASE, { waitUntil: 'networkidle' });
+await demo.evaluate(() => localStorage.clear());
+await demo.goto(RAW_BASE, { waitUntil: 'networkidle' });
+await demo.waitForSelector('.setup-notice');
+await demo.waitForSelector('.surface:not([hidden]) .doc-term[data-doc="readme"]');
+ok('static documentation has no console/page errors', demoErrors.length === 0, demoErrors.join(' | '));
+
+const docNames = await demo.$$eval('.folder-name', (nodes) => nodes.map((node) => node.textContent));
+ok('documentation has the seven requested pages in reading order',
+  docNames.join('|') === 'README|Using it|Keyboard|Themes|Customizations|Security|Contributing', docNames.join('|'));
+ok('Installation and Setup are replaced by Using it', !docNames.includes('Installation') && !docNames.includes('Setup') && docNames.includes('Using it'));
+const docPatterns = await demo.$$eval('.doc-term', (terms) => terms.map((term) =>
+  [...term.classList].find((name) => name.startsWith('pattern-'))));
+ok('every documentation page has a distinct background pattern',
+  new Set(docPatterns).size === 7, docPatterns.join(','));
+ok('Keyboard page has a pictogram rather than initials', await demo.evaluate(() => {
+  const row = [...document.querySelectorAll('.folder')].find((folder) => folder.querySelector('.folder-name')?.textContent === 'Keyboard');
+  return !!row?.querySelector('.folder-badge svg[data-icon="keyboard"]');
+}));
+
+const lead = await demo.locator('.surface:not([hidden]) .doc-lead').textContent();
+ok('README opens with the exact emphasized statement', lead ===
+  'ttydterm is a terminal experience right in your browser. It uses ttyd, with a special customized index.html file to give you a great terminal experience right in your browser.', lead);
+ok('README link and MIT license are separate readable content', await demo.evaluate(() => {
+  const body = document.querySelector('.surface:not([hidden]) .doc-body');
+  const link = body?.querySelector('a[href="https://github.com/anilgulecha/ttydterm"]');
+  return !!link && link.textContent === 'https://github.com/anilgulecha/ttydterm' && body?.textContent.includes('(MIT licensed)');
+}));
+ok('README sends the reader to Using it', (await demo.locator('.surface:not([hidden]) .doc-body').textContent()).includes('Next, open Using it'));
+
+const bannerCommand = (await demo.locator('.setup-notice code').textContent()) || '';
+ok('one authenticated loopback command carries the required ttyd flags',
+  bannerCommand.includes('bash -c') && bannerCommand.includes('-i 127.0.0.1') && bannerCommand.includes('-p 7681') &&
+  bannerCommand.includes(' -W ') && bannerCommand.includes(' -O ') && bannerCommand.includes('-c "ttydterm:$TTYDTERM_PASSWORD"') &&
+  bannerCommand.includes('-I "$HOME/ttydterm.html"') && bannerCommand.includes('-t cursorBlink=false') && bannerCommand.includes('bash -l'));
+ok('canonical launch command removes URL argument injection and literal credentials',
+  !bannerCommand.includes(' -a ') && !bannerCommand.includes('user:password') && !bannerCommand.includes('ttydterm:password'));
+ok('README renders the exact banner launch command',
+  (await demo.locator('.surface:not([hidden]) .doc-command code').first().textContent()) === bannerCommand);
+
+await demo.locator('.folder', { hasText: 'Using it' }).click();
+const usingText = await demo.locator('.surface:not([hidden]) .doc-body').textContent();
+ok('Using it includes four scoped package managers, download, localhost auth and tmux limits',
+  ['brew install ttyd tmux','sudo apt install ttyd tmux','sudo dnf install ttyd tmux','sudo pacman -S ttyd tmux',
+   'curl -fL https://raw.githubusercontent.com/anilgulecha/ttydterm/main/index.html','http://localhost:7681',
+   'username is ttydterm','as long as the tmux server and its session do'].every((text) => usingText.includes(text)));
+
+await demo.locator('.folder', { hasText: 'Keyboard' }).click();
+await demo.waitForSelector('.surface:not([hidden]) .doc-term[data-doc="keyboard"]');
+const keyboardText = await demo.locator('.surface:not([hidden]) .doc-body').textContent();
+ok('Keyboard page points to the sidebar-footer keyboard icon',
+  keyboardText.includes('keyboard icon in the sidebar footer') && keyboardText.includes('sidebar is collapsed'));
+
+await demo.locator('.folder', { hasText: 'Customizations' }).click();
+const customPanes = demo.locator('.surface:not([hidden]) .pane');
+ok('Customizations demonstrates one left pane plus a stacked right pair',
+  await customPanes.count() === 3 && await demo.evaluate(() => {
+    const surface = document.querySelector('.surface:not([hidden])');
+    const outer = surface?.querySelector('.canvas > .split.columns');
+    if (!outer) return false;
+    const slots = [...outer.children].filter((node) => node.classList?.contains('slot'));
+    const nested = slots[1]?.querySelector(':scope > .split.rows');
+    if (!nested) return false;
+    const rows = [...nested.children].filter((node) => node.classList?.contains('slot'));
+    if (slots.length !== 2 || rows.length !== 2) return false;
+    const widths = slots.map((node) => node.getBoundingClientRect().width);
+    const heights = rows.map((node) => node.getBoundingClientRect().height);
+    return Math.abs(widths[0] - widths[1]) <= 2 && Math.abs(heights[0] - heights[1]) <= 2;
+  }));
+const customText = await customPanes.allTextContents();
+ok('Customizations explains right-click splits and per-pane command/tmux settings',
+  customText.some((text) => text.includes('Right-click any pane')) &&
+  customText.some((text) => text.includes('own command')) && customText.some((text) => text.includes('own tmux setting')));
+await demo.screenshot({ path: `${SHOTS}/30-customizations-doc.png` });
+
+await demo.locator('.folder', { hasText: 'Themes' }).click();
+await demo.waitForSelector('.surface:not([hidden]) .doc-themes .theme-opt');
+ok('Themes opens on the first built-in theme', await demo.evaluate(() =>
+  document.querySelector('.surface:not([hidden]) .theme-opt[aria-checked="true"]')?.getAttribute('aria-label') === 'Theme night'));
+const themeBefore = await demo.locator('.shell').evaluate((el) => getComputedStyle(el).backgroundColor);
+await demo.locator('.surface:not([hidden]) .theme-opt[aria-label="Theme paper"]').click();
+const themeAfter = await demo.locator('.shell').evaluate((el) => getComputedStyle(el).backgroundColor);
+ok('theme choice immediately repaints this documentation workspace', themeBefore !== themeAfter, `${themeBefore} -> ${themeAfter}`);
+ok('documentation theme interaction never creates a saved real-workspace config',
+  await demo.evaluate(() => localStorage.getItem('ttyd-workspace-v2') === null));
+await demo.locator('.folder', { hasText: 'README' }).click();
+await demo.waitForSelector('.surface:not([hidden]) .doc-term[data-doc="readme"]');
+await demo.locator('.folder', { hasText: 'Themes' }).click();
+await demo.waitForSelector('.surface:not([hidden]) .doc-term[data-doc="themes"]');
+ok('Themes workspace remembers its own live choice while mounted', await demo.evaluate(() =>
+  document.querySelector('.surface:not([hidden]) .theme-opt[aria-checked="true"]')?.getAttribute('aria-label') === 'Theme paper'));
+
+// Rendered banner contrast is measured after every live workspace theme choice.
+const bannerContrast = [];
+for (const option of await demo.locator('.surface:not([hidden]) .theme-opt').all()) {
+  const label = await option.getAttribute('aria-label');
+  await option.click();
+  await demo.waitForFunction((expected) =>
+    document.querySelector('.surface:not([hidden]) .theme-opt[aria-checked="true"]')?.getAttribute('aria-label') === expected, label);
+  await demo.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  bannerContrast.push(await demo.evaluate(() => {
+    const parse = (value) => (value.match(/[\d.]+/g) || []).map(Number).slice(0, 3);
+    const lin = (c) => { c /= 255; return c <= .03928 ? c / 12.92 : Math.pow((c + .055) / 1.055, 2.4); };
+    const lum = (rgb) => { const [r,g,b] = rgb.map(lin); return .2126*r + .7152*g + .0722*b; };
+    const ratio = (a,b) => { const [hi,lo] = lum(a)>lum(b)?[lum(a),lum(b)]:[lum(b),lum(a)]; return (hi+.05)/(lo+.05); };
+    const notice = document.querySelector('.setup-notice');
+    const button = notice?.querySelector('button');
+    const message = notice?.querySelector(':scope > span');
+    if (!notice || !button || !message) return { text:0, focus:0, message:0 };
+    button.focus({ focusVisible:true });
+    const buttonStyle = getComputedStyle(button), noticeStyle = getComputedStyle(notice);
+    return {
+      text: ratio(parse(buttonStyle.color), parse(buttonStyle.backgroundColor)),
+      focus: ratio(parse(buttonStyle.outlineColor), parse(noticeStyle.backgroundColor)),
+      message: ratio(parse(getComputedStyle(message).color), parse(noticeStyle.backgroundColor)),
+    };
+  }));
+}
+ok('demo banner text, buttons, and focus colors clear their minimums in every theme',
+  bannerContrast.every(({text,focus,message}) => text >= 4.5 && focus >= 3 && message >= 4.5), JSON.stringify(bannerContrast));
+await demo.screenshot({ path: `${SHOTS}/31-themes-live-doc.png` });
+await demo.locator('.folder', { hasText: 'README' }).click();
+await demo.waitForSelector('.surface:not([hidden]) .doc-term[data-doc="readme"]');
+await demo.screenshot({ path: `${SHOTS}/32-readme-demo-banner.png` });
+
+await demo.locator('.folder', { hasText: 'Security' }).click();
+await demo.waitForSelector('.surface:not([hidden]) .doc-term[data-doc="security"]');
+const securityDoc = demo.locator('.surface:not([hidden]) .doc-term[data-doc="security"]');
+ok('long documentation is a labelled keyboard-scrollable region', await securityDoc.evaluate((element) =>
+  element.tabIndex === 0 && element.getAttribute('role') === 'region' && !!element.getAttribute('aria-label') && element.scrollHeight > element.clientHeight));
+/* Workspace activation asks its pane to focus after React commits. Wait for
+   that request to settle, then emulate the user's later Tab into the region;
+   otherwise the deferred pane focus can race this test's programmatic focus. */
+await demo.waitForTimeout(50);
+await securityDoc.evaluate((element) => { element.scrollTop = 0; });
+await securityDoc.focus();
+ok('the documentation scroll region accepts keyboard focus', await securityDoc.evaluate((element) => document.activeElement === element));
+await demo.keyboard.press('End');
+await demo.waitForFunction(() => {
+  const element = document.querySelector('.surface:not([hidden]) .doc-term[data-doc="security"]');
+  return !!element && Math.abs(element.scrollTop - (element.scrollHeight - element.clientHeight)) < 2;
+});
+ok('keyboard users can scroll long documentation to its end', await securityDoc.evaluate((element) =>
+  Math.abs(element.scrollTop - (element.scrollHeight - element.clientHeight)) < 2));
+ok('the demo banner does not cover the last documentation line at maximum scroll', await demo.evaluate(() => {
+  const doc = document.querySelector('.surface:not([hidden]) .doc-term[data-doc="security"]');
+  const banner = document.querySelector('.setup-notice');
+  if (!doc || !banner) return false;
+  doc.scrollTop = doc.scrollHeight;
+  const prompt = doc.querySelector('.term-body > .term-row:last-child');
+  return !!prompt && prompt.getBoundingClientRect().bottom <= banner.getBoundingClientRect().top;
+}));
+const securityText = await demo.locator('.surface:not([hidden]) .doc-body').textContent();
+ok('Security distinguishes origin, authentication, trusted shell input, TLS and tmux continuity',
+  ['not a CORS switch','Basic Auth stops an unauthenticated visitor','trusted, executable shell input',
+   'use TLS as well as authentication','tmux is continuity, not security'].every((text) => securityText.includes(text)));
+await demo.locator('.folder', { hasText: 'Contributing' }).click();
+await demo.waitForSelector('.surface:not([hidden]) .doc-term[data-doc="contributing"]');
+const contributingText = await demo.locator('.surface:not([hidden]) .doc-body').textContent();
+ok('Contributing states no PRs and asks issues to include recommendation plus implementation prompt',
+  contributingText.includes('does not accept pull requests') && contributingText.includes('recommendation itself') &&
+  contributingText.includes('implementation prompt') && contributingText.includes('when time permits'));
+
+/* At phone/tablet widths the banner changes from one row to a vertical stack,
+   so desktop clearance does not prove the last line remains readable there. */
+await demo.setViewportSize({ width:600, height:720 });
+await demo.goto(RAW_BASE + '#/f/doc-using', { waitUntil:'networkidle' });
+await demo.waitForSelector('.surface:not([hidden]) .doc-term[data-doc="using"]');
+ok('the stacked narrow demo banner leaves the final documentation line unobscured', await demo.evaluate(() => {
+  const doc = document.querySelector('.surface:not([hidden]) .doc-term[data-doc="using"]');
+  const banner = document.querySelector('.setup-notice');
+  if (!doc || !banner) return false;
+  doc.scrollTop = doc.scrollHeight;
+  const prompt = doc.querySelector('.term-body > .term-row:last-child');
+  return !!prompt && prompt.getBoundingClientRect().bottom <= banner.getBoundingClientRect().top;
+}));
+
+// A saved real workspace wins over static documentation and remains untouched.
+const savedContext = await browser.newContext();
+const saved = await savedContext.newPage();
+await saved.route('**/token', (route) => route.fulfill({ status:200, contentType:'application/json', body:'{}' }));
+await saved.goto(RAW_BASE, { waitUntil: 'networkidle' });
+const savedConfig = {version:6,ui:{railWidth:176,railOpen:true,fontSize:13,fontWeight:'regular'},folders:[{
+  id:'saved-real',name:'saved-real',cwd:'~',theme:'forest',icon:null,pattern:'dots',
+  layout:{type:'pane',id:'saved-pane',command:'echo kept',persist:false}
+}]};
+await saved.evaluate((config) => localStorage.setItem('ttyd-workspace-v2', JSON.stringify(config)), savedConfig);
+await saved.reload({ waitUntil: 'networkidle' });
+await saved.waitForSelector('.folder-name');
+ok('static hosting does not replace a saved real-workspace configuration',
+  await saved.locator('.folder-name').textContent() === 'saved-real' &&
+  await saved.evaluate(() => JSON.parse(localStorage.getItem('ttyd-workspace-v2')).folders[0].id === 'saved-real'));
+await savedContext.close();
+await demoContext.close();
+
+// A saved real workspace first renders while runtime detection is probing, then
+// switches to xterm when /token proves ttyd. This exact transition once changed
+// the hook count inside Terminal and could trigger React's “fewer hooks” error.
+const transitionContext = await browser.newContext();
+await transitionContext.addInitScript((config) =>
+  localStorage.setItem('ttyd-workspace-v2', JSON.stringify(config)), savedConfig);
+const transitionPage = await transitionContext.newPage();
+const transitionMessages = [];
+transitionPage.on('console', (message) => transitionMessages.push(message.text()));
+transitionPage.on('pageerror', (error) => transitionMessages.push(String(error)));
+await transitionPage.route('**/token', (route) => route.fulfill({
+  status:200, contentType:'application/json', body:JSON.stringify({token:'test-token'}),
+}));
+await transitionPage.goto(RAW_BASE, { waitUntil:'domcontentloaded' });
+await transitionPage.waitForSelector('.surface:not([hidden]) .xterm-term');
+ok('probing to real ttyd changes renderer without violating React hook order',
+  !transitionMessages.some((message) => /Rendered (fewer|more) hooks|order of Hooks/i.test(message)),
+  transitionMessages.filter((message) => /hook/i.test(message)).join(' | '));
+await transitionContext.close();
 
 // ---------------------------------------------------------- reduced motion
 // Every animation is a preference away from being off — and with motion off

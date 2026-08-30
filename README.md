@@ -1,13 +1,18 @@
 # ttydterm
 
-A tmuxinator-shaped terminal workspace that ships as **one HTML file**. Folders
-(workspaces) live in the left rail; each folder owns a split tree of panes; every
-pane is a terminal. The whole configuration is a single JSON object in
-`localStorage`, copy/paste-able for backup and restore.
+**Current application version: 1.0.** The same version is shown beneath the
+`ttydterm` wordmark in the app.
+
+ttydterm is a terminal experience right in your browser. It uses ttyd, with a
+special customized `index.html` file to give you a great terminal experience
+right in your browser. The app ships as one completely offline HTML file: each
+workspace owns a theme, background pattern, and split tree of terminal panes,
+with optional tmux continuity.
 
 The same artifact has three modes: real terminals when served by writable ttyd,
-a documentation/demo workspace on static hosting, and setup instructions when
-opened directly as a file. `?mock=1` remains available for deterministic tests.
+a seven-workspace documentation/demo on static hosting or `file://`, and
+`?mock=1` for deterministic browser tests. Documentation mode never replaces a
+saved real-workspace configuration.
 
 ## Edit, build, and run
 
@@ -20,7 +25,9 @@ src/styles.css      styles
 src/app.tsx         strictly typed React application
 src/modal.tsx       shared modal shell, form, fields, and actions
 src/types.ts        runtime/config/layout domain types
-src/commands.ts     typed shell and tmux command construction
+src/commands.ts     canonical ttyd, shell, and tmux command construction
+src/docs.ts         typed seven-page static documentation content
+src/version.ts      application version source of truth
 tsconfig.json       strict compile-time checks
 build.mjs           typecheck + deterministic Bun assembler
 index.html          generated distributable; do not edit directly
@@ -46,9 +53,9 @@ python3 -m http.server 8000
 
 ## The design law
 
-**The only text outside a terminal is the product name and the workspace names.**
-`ttydterm` sits once at the head of the rail, with the collapse toggle beside
-it; folder names run beneath. Everything else is a pictogram revealed on hover,
+**The only text outside a terminal is the product name, application version,
+and workspace names.** `ttydterm` and `v1.0` sit once at the head of the rail,
+with the collapse toggle beside them; folder names run beneath. Everything else is a pictogram revealed on hover,
 or lives inside an overlay — a dialog, the command palette, or a pane's own
 settings popover. Those three may show words because the user opened them to
 read words.
@@ -133,17 +140,19 @@ the terminal.
 
 ```jsonc
 {
-  "version": 3,
-  "ui": { "railWidth": 208, "railOpen": true },   // sidebar geometry rides along
+  "version": 6,
+  "ui": { "railWidth": 176, "railOpen": true },   // sidebar geometry rides along
   "folders": [{
     "id": "f-jr",
     "name": "kalviumjr",              // optional; falls back to the last cwd segment
     "cwd": "~/work/kalviumjr",
     "icon": "code",                   // optional; else the first two letters
+    "theme": "night",                 // retained by this workspace
+    "pattern": "dots",                // non-colour workspace identity
     "layout": {                       // a tree of splits and panes
       "type": "split", "axis": "columns", "sizes": [0.56, 0.44],
       "children": [
-        { "type": "pane", "id": "p-1", "command": "pi", "persist": true, "color": "ocean" },
+        { "type": "pane", "id": "p-1", "command": "pi", "persist": true },
         { "type": "split", "axis": "rows", "sizes": [0.55, 0.45], "children": [ /* … */ ] }
       ]
     }
@@ -157,13 +166,16 @@ the terminal.
   get.
 - `sizes` are fractions that sum to 1, so a layout is resolution-independent —
   the same config looks right on a laptop and a 4K screen.
-- One top-level `theme` paints terminals, the stage, and application chrome.
-- Terminal panes retain their restrained solid/patterned backgrounds. The sidebar alone receives the pure-function-generated **soft horizon** treatment at its active 8% strength, with no drop shadow.
+- Each folder/workspace retains its own `theme`; activating it repaints its
+  terminals, stage, dialogs, and sidebar together.
+- Terminal panes retain restrained solid/patterned backgrounds. The sidebar
+  alone receives the pure-function-generated **soft horizon** treatment at its
+  active 8% strength, with no drop shadow.
 - Top-level `ui.fontSize` applies immediately to every terminal.
-- A pane's optional `color` only selects its focused 3px border colour.
-- A folder's `pattern` is one of seven non-colour terminal-background identities, deterministically assigned when absent.
-- A **v2/v3 blob still loads**: validation migrates folder/pane themes and defaults `ui`
-  and `icon` when they are missing.
+- A folder's `pattern` is one of seven non-colour terminal-background identities,
+  deterministically assigned when absent.
+- Older backup blobs still load: validation rebuilds untrusted JSON and defaults
+  missing UI, icon, theme, and pattern values.
 
 ## Interactions
 
@@ -174,7 +186,7 @@ the terminal.
 | Split | The existing pane keeps slot 0 (leftmost / topmost) |
 | Drag a divider | Resizes the two neighbouring slots only; siblings hold their share |
 | Drag the rail edge | Resizes the sidebar (148–420px), persisted in the config |
-| Hover a folder | Its **own** gear + remove appear, in space the row already reserved |
+| Hover/focus a folder | Its overlaid triple-dot menu appears without changing the label width |
 | Double-click a folder | Folder settings |
 | `⌘/Ctrl+K` or `⌘/Ctrl+P` | Command palette |
 | `⌘/Ctrl+B` | Collapse/expand the sidebar (also the toggle beside the wordmark) |
@@ -219,8 +231,8 @@ The one exception is **New folder**: a folder that does not exist yet has
 nothing to write through to, so that path keeps Create/Cancel over a local
 draft.
 
-Pane settings are a **full-pane overlay inside the pane**, not a modal — three controls
-(command, run in tmux, active-border colour), in the global terminal palette. A
+Pane settings are a **full-pane overlay inside the pane**, not a modal — command
+and run-in-tmux controls painted in that workspace's terminal palette. A
 dialog was wrong twice over: it dimmed the entire window to change one terminal,
 and it put the thing being configured behind a scrim *while you configured it*,
 so the theme you were picking was the one colour you could not see. It keeps its
@@ -257,13 +269,13 @@ is linkable and back/forward work.
 
 ## Colour
 
-**One global palette, deliberately.**
+**One audited palette per workspace.**
 
-The top-level `theme` paints terminals, gaps, dialogs and the sidebar. Terminal
-panes retain the primary background and optional workspace pattern. The sidebar
-matches that terminal base and alone layers the four deterministic soft-horizon
-gradients at the active 8% strength, without a shadow. Per-pane `color` changes
-only the focused pane ring.
+The active folder's `theme` paints its terminals, gaps, dialogs and sidebar.
+Terminal panes retain that background plus the workspace pattern. The sidebar
+matches the terminal base and alone layers the four deterministic soft-horizon
+gradients at active 8% strength, without a shadow. Switching workspaces is an
+instant paint to the next workspace's retained palette.
 
 Matching does not waive contrast: the rail uses the same audited terminal
 foreground and dim tokens as the pane it matches, while dialogs and fields retain
@@ -344,29 +356,37 @@ get movement, and the scroll absorbs it.
 
 ## Running with vanilla ttyd
 
-The same offline `index.html` now has two intentional modes. On GitHub Pages,
-a static server, or `file://`, it renders read-only documentation workspaces
-(README, installation, setup, keyboard, themes and security) and shows the
-one-time launch command. A valid same-origin ttyd `/token` endpoint switches
-real panes to bundled xterm.js instances connected to vanilla ttyd's `/ws`.
+On GitHub Pages, a static server, or `file://`, the artifact renders seven
+terminal-style documentation workspaces: README, Using it, Keyboard, Themes,
+Customizations, Security, and Contributing. A valid same-origin ttyd `/token`
+endpoint instead activates bundled xterm.js panes connected to vanilla ttyd's
+`/ws`.
 
-Save the artifact as `~/ttydterm.html`, then run:
+Install ttyd and the recommended tmux package with your platform's package
+manager, then download the artifact:
 
 ```bash
-ttyd -i 127.0.0.1 -p 7681 -W -a -O \
-  -I "$HOME/ttydterm.html" -t cursorBlink=false bash -l
+curl -fL https://raw.githubusercontent.com/anilgulecha/ttydterm/main/index.html -o "$HOME/ttydterm.html"
 ```
 
-On the first real launch, ttydterm asks for the first working directory and can
-probe the writable shell for `$HOME`, `$PWD`, `$SHELL`, and tmux. A pane marked
-persistent uses `tmux new-session -A` with a deterministic shell-safe name.
-Basic-auth credentials, when needed, belong to ttyd (`-c user:password`) and the
-browser's HTTP authentication layer; backup JSON never needs them.
+Run this once after each computer boot. It silently prompts for the password,
+binds only to loopback, and enables browser Basic Auth with username `ttydterm`:
 
-Because ttyd serves the custom frontend with `ttyd -I ttydterm.html`, the app
-and terminal endpoints are same-origin — no CORS or mixed content. Paths are
-derived from the current pathname, matching vanilla ttyd's `--base-path` rules. The earlier GitHub-Pages iframe probe (recoverable at
-`9b90135`) is what ruled that path out.
+```bash
+bash -c 'read -rsp "ttydterm password: " TTYDTERM_PASSWORD || exit; echo; ttyd -i 127.0.0.1 -p 7681 -W -O -c "ttydterm:$TTYDTERM_PASSWORD" -I "$HOME/ttydterm.html" -t cursorBlink=false bash -l; status=$?; unset TTYDTERM_PASSWORD; exit $status'
+```
+
+Open <http://localhost:7681>. The literal password is not stored in a URL,
+ttydterm configuration, backup, or the saved command; ttyd still receives the
+credential as a process argument. Basic Auth is not encryption, so any setup
+bound beyond `127.0.0.1` also needs TLS.
+
+`-I` makes the page, `/token`, and `/ws` same-origin, so this setup needs no CORS
+permission. `-O` independently rejects foreign WebSocket Origins; it is not a
+CORS switch or authentication. Pane commands and restored configurations remain
+trusted executable shell input. A tmux pane can survive a browser/ttyd reconnect
+while its tmux server and session live; tmux is not a security boundary or
+host-reboot persistence.
 
 ## Test
 
@@ -403,19 +423,18 @@ and a reduced-motion pass, these groups encode this round's feedback:
   search and backup share one row; the footer is `display:none` when collapsed.
 - **contrast (WCAG AA)** — 9 themes × terminal colours, explicit UI token pairs and focus rings from the
   page's own table, plus every glyph actually painted on screen.
-- **sidebar system theme** — the rail's panel, active/resting label, marker and
-  icon colours are identical across a dark and a light workspace; the stage is
-  not.
+- **per-workspace theme** — the rail, stage, terminals and dialogs repaint from
+  the active workspace; switching away and back restores each workspace's
+  retained palette.
 - **instant workspace switch** — no surface animation or transition, no row
-  fade, no skeleton replay, on screen in < 250ms, previous folder still mounted,
-  inactive surfaces never `display:none`, and — the one that would have caught
+  fade, no skeleton replay, the target surface committed in the switching
+  render, previous folder still mounted, inactive surfaces never `display:none`,
+  and — the one that would have caught
   the bug — **no animation is *running* on the arriving panes**, measured with
   `getAnimations()` on both the outward and the return trip.
 - **pane settings live in the pane** — not a dialog, contained within the pane's
-  box, compact, opaque once settled, exactly command + tmux + theme, no
-  Save/Cancel, and every one of the three autosaves (the command reaches the
-  terminal, the tick reaches `localStorage`, the theme repaints *exactly one*
-  pane).
+  box, compact, opaque once settled, exactly command + tmux, no Save/Cancel,
+  and both controls autosave.
 - **pane chrome never breaks the border** — every control is ≥ 3px inside the
   pane and the edge overlay's z-index is above all of them.
 

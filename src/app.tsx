@@ -151,6 +151,7 @@ const FLOOR = 0.08;  // smallest share a slot may be dragged to (bounds canvas g
 const RAIL_MIN = 148, RAIL_MAX = 420, RAIL_DEFAULT = 176;
 
 const RAIL_COLLAPSED = 52;
+const COMPLETION_ATTENTION_MS = 5000;
 
 const uid = (p: string) => p + Math.random().toString(36).slice(2, 9);
 const pane = (command: string, persist = false): PaneNode => ({ type:'pane', id: uid('p-'), command, persist });
@@ -319,10 +320,10 @@ const mapTree = (node: LayoutNode | null, fn: (node: LayoutNode) => LayoutNode):
   return node;
 };
 
-const splitPane = (root: LayoutNode | null, paneId: string, axis: SplitAxis, count: number) =>
+const splitPane = (root: LayoutNode | null, paneId: string, axis: SplitAxis, count: number, persist = false) =>
   mapTree(root, (n) => {
     if (n.type !== 'pane' || n.id !== paneId) return n;
-    const extra = Array.from({ length: count - 1 }, () => pane('bash', false));
+    const extra = Array.from({ length: count - 1 }, () => pane('bash', persist));
     return { type:'split', axis, sizes: equal(count), children: [n, ...extra] };
   });
 
@@ -497,6 +498,12 @@ const parseCompletionStatus = (data: string): number | null => {
 };
 window.__parseCompletionStatus=parseCompletionStatus;
 
+const pasteIntoTerminal = (term:XtermTerminal, text:string) => {
+  if (text) term.paste(text);
+  term.focus();
+};
+window.__pasteIntoTerminal=pasteIntoTerminal;
+
 function RealTerminal({ folder, pane, runtime, suspended, onCommandComplete }: {
   folder: Folder;
   pane: PaneNode;
@@ -532,8 +539,8 @@ function RealTerminal({ folder, pane, runtime, suspended, onCommandComplete }: {
     const input=term.onData(sendInput),resize=term.onResize(({cols,rows})=>socket.readyState===1&&socket.send(encoder.encode('1'+JSON.stringify({columns:cols,rows}))));
     let toastTimer:ReturnType<typeof setTimeout>;
     const showToast=(text:string)=>{setToast(text);clearTimeout(toastTimer);toastTimer=setTimeout(()=>setToast(null),1400)};
-    const pasteText=(text:string)=>{if(text)term.paste(text)};
-    const readClipboard=async()=>{try{pasteText(await navigator.clipboard.readText())}catch{showToast('Clipboard access blocked')}};
+    const pasteText=(text:string)=>pasteIntoTerminal(term,text);
+    const readClipboard=async()=>{try{pasteText(await navigator.clipboard.readText())}catch{showToast('Clipboard access blocked');term.focus()}};
     const nativePaste=(event:ClipboardEvent)=>{const text=event.clipboardData?.getData('text/plain');if(text){event.preventDefault();pasteText(text)}};
     const menuPaste=()=>{void readClipboard()};
     const focusTerminal=()=>term.focus();
@@ -812,24 +819,21 @@ function useRoute() {
   return parts;
 }
 
-function useTmux(): TmuxState {
-  const [tmux, setTmux] = useState<TmuxState>({ state: 'probing' });
-  useEffect(() => {
-    const t = setTimeout(() => setTmux({ state: 'present', version: '3.4' }), 400);
-    return () => clearTimeout(t);
-  }, []);
-  return tmux;
-}
+const tmuxState = (capabilities:Capabilities, runtime:Runtime):TmuxState => capabilities.state === 'ready'
+  ? capabilities.tmux ? { state:'present' } : { state:'absent' }
+  : capabilities.state === 'error' || runtime.mode === 'demo' || runtime.mode === 'file'
+    ? { state:'absent' } : { state:'probing' };
 
 type PaneMenu = { source: 'trigger' | 'context'; x: number; y: number };
 interface FocusRequest { id: string; n?: number; nonce?: number }
 
-function Pane({ node, folder, runtime, focused, closing, focusReq, resizing,
+function Pane({ node, folder, runtime, focused, completed, closing, focusReq, resizing,
                onFocus, onSplit, onClose, canClose, onOpenSettings, onCommandComplete }: {
   node: PaneNode;
   folder: Folder;
   runtime: Runtime;
   focused: boolean;
+  completed: number;
   closing: boolean;
   focusReq: FocusRequest | null;
   resizing: boolean;
@@ -862,6 +866,11 @@ function Pane({ node, folder, runtime, focused, closing, focusReq, resizing,
     return () => clearTimeout(t);
   }, [focusReq, node.id]);
 
+  const focusTerminal=()=>{
+    const host=ref.current?.querySelector('.xterm-host');
+    if(host)host.dispatchEvent(new Event('ttydterm-focus'));
+    else ref.current?.focus({preventScroll:true});
+  };
   const split = (axis: SplitAxis, n: number) => { setMenu(null); onSplit(node.id, axis, n); };
 
   return (
@@ -869,6 +878,8 @@ function Pane({ node, folder, runtime, focused, closing, focusReq, resizing,
       ref={ref}
       className={'pane' + (focused ? ' focused' : '') + (closing ? ' closing' : '')}
       style={{ ...themeVars(accent), '--t-ring': accent.blue }}
+      data-pane-id={node.id}
+      aria-label={'Terminal' + (completed ? ', ' + completed + ' completed command' + (completed === 1 ? '' : 's') + ' needing attention' : '')}
       tabIndex={-1}
       onPointerDownCapture={onFocus}
       onFocus={onFocus}
@@ -881,6 +892,7 @@ function Pane({ node, folder, runtime, focused, closing, focusReq, resizing,
       }}
     >
       <Terminal folder={folder} pane={node} runtime={runtime} suspended={resizing} onCommandComplete={onCommandComplete} />
+      {completed ? <span className="pane-complete" aria-hidden="true" /> : null}
 
       {}
       <div className="pane-edge" aria-hidden="true" />
@@ -903,7 +915,7 @@ function Pane({ node, folder, runtime, focused, closing, focusReq, resizing,
                const i = items.indexOf(document.activeElement as HTMLButtonElement);
                if(e.key==="ArrowDown"||e.key==="ArrowRight"){e.preventDefault();items[(i+1+items.length)%items.length]?.focus()}
                else if(e.key==="ArrowUp"||e.key==="ArrowLeft"){e.preventDefault();items[(i-1+items.length)%items.length]?.focus()}
-               else if(e.key==="Escape"){e.preventDefault();setMenu(null);ref.current?.focus()}
+               else if(e.key==="Escape"){e.preventDefault();setMenu(null);focusTerminal()}
              }}
              ref={(el: HTMLDivElement | null) => { if(el && menu.source === "context") requestAnimationFrame(()=>el.querySelector("button")?.focus()); }}>
           <button className="pico" role="menuitem" title="Pane settings" aria-label="Pane settings"
@@ -936,6 +948,7 @@ interface NodeProps {
   focusId: string | null;
   closingId: string | null;
   focusReq: FocusRequest | null;
+  completedByPane: Record<string,number>;
   resizing: boolean;
   onResizeStart: () => void;
   onResizeEnd: () => void;
@@ -949,14 +962,14 @@ interface NodeProps {
   path: number[];
 }
 
-function Node({ node, folder, runtime, focusId, closingId, focusReq, resizing, onResizeStart, onResizeEnd,
+function Node({ node, folder, runtime, focusId, closingId, focusReq, completedByPane, resizing, onResizeStart, onResizeEnd,
                onFocus, onSplit, onClose, canClose, onResize, onOpenSettings, onCommandComplete, path }: NodeProps) {
   const ref = useRef<HTMLDivElement | null>(null);
 
   if (node.type === 'pane') {
     const leaf = node;
     return (
-      <Pane node={leaf} folder={folder} runtime={runtime} focused={focusId === leaf.id} closing={closingId === leaf.id}
+      <Pane node={leaf} folder={folder} runtime={runtime} focused={focusId === leaf.id} completed={completedByPane[leaf.id] || 0} closing={closingId === leaf.id}
             focusReq={focusReq} resizing={resizing}
             onFocus={() => onFocus(leaf.id)} onSplit={onSplit} onClose={onClose} canClose={canClose}
             onOpenSettings={onOpenSettings} onCommandComplete={onCommandComplete} />
@@ -1039,7 +1052,7 @@ function Node({ node, folder, runtime, focusId, closingId, focusReq, resizing, o
           ) : null}
           <div className="slot" style={{ flexBasis: 'calc((100% - ' + gaps + 'px) * ' + node.sizes[i] + ')' }}>
             <Node node={child} folder={folder} runtime={runtime} focusId={focusId} closingId={closingId} focusReq={focusReq}
-                  resizing={resizing} onResizeStart={onResizeStart} onResizeEnd={onResizeEnd}
+                  completedByPane={completedByPane} resizing={resizing} onResizeStart={onResizeStart} onResizeEnd={onResizeEnd}
                   onFocus={onFocus} onSplit={onSplit} onClose={onClose} canClose={canClose}
                   onResize={onResize} onOpenSettings={onOpenSettings} onCommandComplete={onCommandComplete} path={path.concat(i)} />
           </div>
@@ -1049,7 +1062,7 @@ function Node({ node, folder, runtime, focusId, closingId, focusReq, resizing, o
   );
 }
 
-function Surface({ folder, runtime, active, focusId, closingId, focusReq, appResizing,
+function Surface({ folder, runtime, active, focusId, closingId, focusReq, completedByPane, appResizing,
                    onFocus, onSplit, onClose, onResize, onAddFirst, onOpenSettings, onCommandComplete }: {
   folder: Folder;
   runtime: Runtime;
@@ -1057,6 +1070,7 @@ function Surface({ folder, runtime, active, focusId, closingId, focusReq, appRes
   focusId: string | null;
   closingId: string | null;
   focusReq: FocusRequest | null;
+  completedByPane: Record<string,number>;
   appResizing: boolean;
   onFocus: (paneId: string) => void;
   onSplit: (paneId: string, axis: SplitAxis, count: number) => void;
@@ -1093,7 +1107,7 @@ function Surface({ folder, runtime, active, focusId, closingId, focusReq, appRes
             height: Math.max(box.h, Math.ceil(min.h)),
           }}>
             <Node node={folder.layout} folder={folder} runtime={runtime} focusId={focusId} closingId={closingId} focusReq={focusReq}
-                  resizing={resizing || appResizing}
+                  completedByPane={completedByPane} resizing={resizing || appResizing}
                   onResizeStart={() => setResizing(true)} onResizeEnd={() => setResizing(false)}
                   onFocus={onFocus} onSplit={onSplit} onClose={onClose} canClose={canClose}
                   onResize={onResize} onOpenSettings={onOpenSettings} onCommandComplete={onCommandComplete} path={[]} />
@@ -1164,17 +1178,25 @@ function ThemeChoice({ label, value, onChange, folderTheme }: {
 
 const initials = (label: string) => label.replace(/[^a-z0-9]+/gi, '').slice(0, 2) || '··';
 
-function FolderDialog({ folder, isNew, onChange, onCreate, onDelete, onClose, canDelete }: {
+function FolderDialog({ folder, isNew, tmux, onChange, onCreate, onDelete, onClose, canDelete }: {
   folder: Folder;
   isNew?: boolean;
+  tmux?: TmuxState;
   onChange?: (patch: Partial<Folder>) => void;
-  onCreate?: (folder: Folder) => void;
+  onCreate?: (folder: Folder, persist: boolean) => void;
   onDelete?: () => void;
   onClose: () => void;
   canDelete?: boolean;
 }) {
   const [draft, setDraft] = useState<Folder>(folder);
+  const [persist,setPersist]=useState(tmux?.state === 'present');
+  const persistTouched=useRef(false);
   useEffect(() => setDraft(folder), [folder]);
+  useEffect(()=>{
+    if(!isNew||persistTouched.current)return;
+    if(tmux?.state==='present')setPersist(true);
+    else if(tmux?.state==='absent')setPersist(false);
+  },[isNew,tmux?.state]);
   const put = (patch: Partial<Folder>) => { setDraft((d) => ({ ...d, ...patch })); if (!isNew) onChange?.(patch); };
   const nameId = useId(), cwdId = useId();
   const label = draft.name.trim() || draft.cwd.split('/').filter((s) => s && s !== '~').pop() || 'workspace';
@@ -1190,7 +1212,7 @@ function FolderDialog({ folder, isNew, onChange, onCreate, onDelete, onClose, ca
           destructive={!isNew && canDelete ? <Button kind="danger" onClick={onDelete}>Delete folder</Button> : null}
           secondary={isNew ? <Button onClick={onClose}>Cancel</Button> : null}
           primary={isNew
-            ? <Button kind="primary" onClick={() => onCreate?.({ ...draft, name: draft.name.trim(), cwd: draft.cwd.trim() || '~' })}>Create</Button>
+            ? <Button kind="primary" onClick={() => onCreate?.({ ...draft, name: draft.name.trim(), cwd: draft.cwd.trim() || '~' }, persist)}>Create</Button>
 
             : <Button kind="primary" onClick={onClose}>Done</Button>}
         />
@@ -1221,6 +1243,16 @@ function FolderDialog({ folder, isNew, onChange, onCreate, onDelete, onClose, ca
           </div>
         )}
       </FieldGroup>
+      {isNew ? <CheckboxField
+        label="Keep the first terminal alive with tmux"
+        checked={persist}
+        disabled={tmux?.state !== 'present'}
+        onChange={(checked)=>{persistTouched.current=true;setPersist(checked)}}
+        hintTone={tmux?.state === 'absent' ? 'warn' : 'default'}
+        hint={tmux?.state === 'present' ? 'Installed and enabled by default. Uncheck to opt out.'
+          : tmux?.state === 'probing' ? 'Checking for tmux…'
+          : 'tmux not found: this terminal dies with the tab.'}
+      /> : null}
       <ThemeChoice label="Theme" value={draft.theme || 'paper'} onChange={(theme) => put({ theme: theme || 'paper' })} />
       <FieldGroup label="Terminal pattern">
         {(labelledBy) => (
@@ -1359,7 +1391,7 @@ function GlobalSettings({ theme, fontSize, fontWeight, notifyOnCommandFinish, no
         onChange={onNotifications}
         hint={notificationState==='unsupported' ? 'System notifications need browser support and a secure origin such as localhost or HTTPS.'
              : notificationState==='denied' ? 'Notifications are blocked. Allow them in this site’s browser settings.'
-             : 'Notifies only when the workspace is inactive or this browser tab or window is not focused.'}
+             : 'Notifies only when its terminal is not focused or this browser tab or window is not focused.'}
         hintTone={notificationState==='unsupported'||notificationState==='denied'?'warn':'default'}
       />
     </ModalForm>
@@ -1523,18 +1555,20 @@ function App() {
   const [configured, setConfigured] = useState(() => testMock || hasSavedConfig());
   const [config, setConfig] = useState<Config>(() => testMock ? loadConfig() : (hasSavedConfig() ? loadConfig() : documentationConfig()));
   const [runtime, setRuntime] = useState<Runtime>(() => location.protocol==='file:' ? {mode:'file',reason:'Opened directly'} : {mode:'probing'});
-  const [capabilities, setCapabilities] = useState<Capabilities>({state:'unknown',tmux:false,home:'~',cwd:'~'});
+  const [capabilities, setCapabilities] = useState<Capabilities>(()=>testMock
+    ? {state:'ready',tmux:true,home:'~',cwd:'~',shell:'/bin/bash',writable:true}
+    : {state:'unknown',tmux:false,home:'~',cwd:'~'});
   const [focusId, setFocusId] = useState<string | null>(null);
   const [focusReq, setFocusReq] = useState<FocusRequest | null>(null);
   const [closingId, setClosingId] = useState<string | null>(null);
   const [confirmCloseId, setConfirmCloseId] = useState<string | null>(null);
   const [appResizing, setAppResizing] = useState(false);
   const [lastPaneByFolder,setLastPaneByFolder]=useState<Record<string,string>>({});
-  const [completedByFolder,setCompletedByFolder]=useState<Record<string,number>>({});
+  const [completedByPane,setCompletedByPane]=useState<Record<string,number>>({});
   const [notificationState,setNotificationState]=useState<NotificationPermissionState>(notificationPermission);
   const paletteInputRef=useRef<HTMLInputElement|null>(null);
   const route = useRoute();
-  const tmux = useTmux();
+  const tmux = tmuxState(capabilities,runtime);
 
   const ui = config.ui;
   const railOpen = ui.railOpen;
@@ -1542,6 +1576,11 @@ function App() {
   const setRailOpen = useCallback((v: boolean | ((previous:boolean)=>boolean)) => setUi({ railOpen: typeof v === 'function' ? v(railOpen) : v }), [railOpen, setUi]);
 
   useEffect(() => { detectRuntime().then(setRuntime); }, []);
+  useEffect(()=>{
+    if(runtime.mode!=='ttyd'||capabilities.state!=='unknown')return;
+    setCapabilities({state:'probing',tmux:false,home:'~',cwd:'~'});
+    probeCapabilities(runtime).then(setCapabilities).catch((error:unknown)=>setCapabilities({state:'error',tmux:false,home:'~',cwd:'~',error:error instanceof Error?error.message:String(error)}));
+  },[runtime,capabilities.state]);
   useEffect(() => { if(configured) localStorage.setItem(STORE_KEY, JSON.stringify(config)); }, [config, configured]);
 
   const folders = config.folders;
@@ -1571,24 +1610,36 @@ function App() {
     if (active && routedId !== active.id) history.replaceState(null, '', '#/f/' + encodeURIComponent(active.id));
   }, [active, routedId, ownsUrl]);
 
-  const clearCompleted=useCallback((folderId:string)=>setCompletedByFolder((current)=>{
-    if(!current[folderId])return current;const next={...current};delete next[folderId];return next;
+  const clearCompleted=useCallback((paneId:string)=>setCompletedByPane((current)=>{
+    if(!current[paneId])return current;const next={...current};delete next[paneId];return next;
   }),[]);
   const focusFolderPane=useCallback((folder:Folder)=>{
     const panes=listPanes(folder.layout);const id=lastPaneByFolder[folder.id]&&panes.some(p=>p.id===lastPaneByFolder[folder.id])?lastPaneByFolder[folder.id]:panes[0]?.id;
-    clearCompleted(folder.id);go('f',folder.id);if(id){setFocusId(id);setFocusReq({id,n:Date.now()})}
+    go('f',folder.id);if(id){clearCompleted(id);setFocusId(id);setFocusReq({id,n:Date.now()})}
   },[clearCompleted,lastPaneByFolder]);
   const onCommandComplete=useCallback((event:CommandCompletion)=>{
-    setCompletedByFolder((current)=>({...current,[event.folderId]:Math.min(99,(current[event.folderId]||0)+1)}));
-    const needsAttention=event.folderId!==activeIdRef.current||document.visibilityState!=='visible'||!document.hasFocus();
-    if(!needsAttention||!configRef.current.ui.notifyOnCommandFinish||typeof Notification==='undefined'||Notification.permission!=='granted')return;
+    if(event.duration<COMPLETION_ATTENTION_MS)return;
+    const focusedPane=document.activeElement?.closest<HTMLElement>('.pane')?.dataset.paneId;
+    const needsAttention=event.folderId!==activeIdRef.current||event.paneId!==focusedPane||document.visibilityState!=='visible'||!document.hasFocus();
+    if(!needsAttention)return;
+    setCompletedByPane((current)=>({...current,[event.paneId]:Math.min(99,(current[event.paneId]||0)+1)}));
+    if(!configRef.current.ui.notifyOnCommandFinish||typeof Notification==='undefined'||Notification.permission!=='granted')return;
     const folder=configRef.current.folders.find((item)=>item.id===event.folderId);if(!folder)return;
     try{
       const notification=new Notification('Command finished',{body:'Workspace “'+folderLabel(folder)+'”',tag:'ttydterm-'+event.paneId});
-      notification.onclick=()=>{window.focus();clearCompleted(event.folderId);go('f',event.folderId);setFocusId(event.paneId);setLastPaneByFolder((current)=>({...current,[event.folderId]:event.paneId}));setFocusReq({id:event.paneId,n:Date.now()});notification.close()};
+      notification.onclick=()=>{window.focus();clearCompleted(event.paneId);go('f',event.folderId);setFocusId(event.paneId);setLastPaneByFolder((current)=>({...current,[event.folderId]:event.paneId}));setFocusReq({id:event.paneId,n:Date.now()});notification.close()};
     }catch{}
   },[clearCompleted]);
   window.__reportCommandCompletion=onCommandComplete;
+  useEffect(()=>{
+    const acknowledgeFocusedPane=()=>{
+      if(document.visibilityState!=='visible'||!document.hasFocus())return;
+      const paneId=document.activeElement?.closest<HTMLElement>('.pane')?.dataset.paneId;
+      if(paneId)clearCompleted(paneId);
+    };
+    addEventListener('focus',acknowledgeFocusedPane);document.addEventListener('visibilitychange',acknowledgeFocusedPane);
+    return()=>{removeEventListener('focus',acknowledgeFocusedPane);document.removeEventListener('visibilitychange',acknowledgeFocusedPane)};
+  },[clearCompleted]);
   const setCommandNotifications=useCallback(async(enabled:boolean)=>{
     if(!enabled){setUi({notifyOnCommandFinish:false});return}
     let permission=notificationPermission();
@@ -1637,8 +1688,8 @@ function App() {
   }, [patchFolder]);
 
   const onSplit = useCallback((paneId: string, axis: SplitAxis, count: number) => {
-    patchFolder(active.id, (f) => ({ ...f, layout: splitPane(f.layout, paneId, axis, count) }));
-  }, [active, patchFolder]);
+    patchFolder(active.id, (f) => ({ ...f, layout: splitPane(f.layout, paneId, axis, count, tmux.state === 'present') }));
+  }, [active, patchFolder, tmux.state]);
 
 
   const commitClose = useCallback(() => {
@@ -1664,8 +1715,8 @@ function App() {
   }, [active, patchFolder]);
 
   const addFirstPane = useCallback(() => {
-    patchFolder(active.id, (f) => ({ ...f, layout: pane('bash', false) }));
-  }, [active, patchFolder]);
+    patchFolder(active.id, (f) => ({ ...f, layout: pane('bash', tmux.state === 'present') }));
+  }, [active, patchFolder, tmux.state]);
 
   const removeFolder = useCallback((id: string) => {
     setConfig((c) => {
@@ -1730,14 +1781,13 @@ function App() {
   }, [active, patchFolder]);
 
   const onPalettePick = (row: PaletteRow) => {
-    clearCompleted(row.folder.id);
-    if(row.kind==='pane'&&row.pane){go('f',row.folder.id);setFocusId(row.pane.id);setLastPaneByFolder(v=>({...v,[row.folder.id]:row.pane!.id}));setFocusReq({id:row.pane.id,n:Date.now()})}
+    if(row.kind==='pane'&&row.pane){clearCompleted(row.pane.id);go('f',row.folder.id);setFocusId(row.pane.id);setLastPaneByFolder(v=>({...v,[row.folder.id]:row.pane!.id}));setFocusReq({id:row.pane.id,n:Date.now()})}
     else focusFolderPane(row.folder);
   };
 
 
   const FolderRow = ({ f, compact, index }: {f:Folder;compact:boolean;index:number}) => {
-    const label = folderLabel(f),completed=completedByFolder[f.id]||0;
+    const label = folderLabel(f),completed=listPanes(f.layout).reduce((sum,p)=>sum+(completedByPane[p.id]||0),0);
     const [open,setOpen]=useState(false);
     useEffect(()=>{if(!open)return;const close=()=>setOpen(false);addEventListener('pointerdown',close);return()=>removeEventListener('pointerdown',close)},[open]);
     return (
@@ -1785,12 +1835,12 @@ function App() {
 
             <span className="brand-block">
               <span className="brand-name">ttydterm</span>
+              <span className="brand-version" aria-label={'version ' + APP_VERSION}>{APP_VERSION}</span>
             </span>
           ) : null}
           <button className="rail-toggle" title={(railOpen ? 'Hide' : 'Show') + ' sidebar (⌘/Ctrl+B)'}
                   aria-label={railOpen ? 'Hide sidebar' : 'Show sidebar'} aria-expanded={railOpen}
                   onClick={() => setRailOpen(!railOpen)}><Ico.panel /></button>
-          {railOpen ? <span className="brand-version">v{APP_VERSION}</span> : null}
         </div>
         {}
         <div className="rail-list">
@@ -1825,8 +1875,8 @@ function App() {
         {runtime.mode !== 'ttyd' && runtime.mode !== 'mock' ? <SetupNotice mode={runtime.mode} onRetry={()=>{setRuntime({mode:'probing'});detectRuntime().then(setRuntime)}} /> : null}
         {folders.map((f) => (
           <Surface key={f.id} folder={f} runtime={runtime} active={f.id === active.id} focusId={focusId} appResizing={appResizing}
-                   closingId={closingId} focusReq={focusReq}
-                   onFocus={(id)=>{setFocusId(id);setLastPaneByFolder(v=>({...v,[f.id]:id}))}} onSplit={onSplit} onClose={onClose} onResize={onResize}
+                   closingId={closingId} focusReq={focusReq} completedByPane={completedByPane}
+                   onFocus={(id)=>{clearCompleted(id);setFocusId(id);setLastPaneByFolder(v=>({...v,[f.id]:id}))}} onSplit={onSplit} onClose={onClose} onResize={onResize}
                    onAddFirst={addFirstPane}
                    onOpenSettings={(id) => go('f', f.id, 'pane', id)} onCommandComplete={onCommandComplete} />
         ))}
@@ -1880,9 +1930,9 @@ function App() {
 
       <ModalShell open={showNewDlg && !!newDraft} onClose={() => go('f', active.id)}>
         {newDraft ? (
-          <FolderDialog folder={{...newDraft,layout:null}} isNew onClose={() => go('f', active.id)}
-            onCreate={(next) => {
-              const folder: Folder = { ...next, theme: next.theme || active.theme || 'paper', layout: pane('bash', false) };
+          <FolderDialog folder={{...newDraft,layout:null}} isNew tmux={tmux} onClose={() => go('f', active.id)}
+            onCreate={(next,persist) => {
+              const folder: Folder = { ...next, theme: next.theme || active.theme || 'paper', layout: pane('bash', persist) };
               setConfig((c) => ({ ...c, folders: c.folders.concat(folder) }));
               go('f', folder.id);
             }} />

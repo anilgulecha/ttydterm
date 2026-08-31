@@ -106,8 +106,9 @@ ok('social previews use the published product screenshot', await page.evaluate((
     content('meta[name="twitter:image"]')==='https://www.gulecha.org/ttydterm/docs/ttydterm.png';
 }));
 ok('hash route settled on a folder', /#\/f\//.test(page.url()), page.url());
-ok('release 1.2 is shown beneath the wordmark and exposed on the shell', await page.evaluate(() =>
-  document.querySelector('.brand-version')?.textContent === 'v1.2' &&
+ok('release 1.2 is a compact superscript beside the wordmark and exposed on the shell', await page.evaluate(() =>
+  document.querySelector('.brand-version')?.textContent === '1.2' &&
+  document.querySelector('.brand-version')?.getAttribute('aria-label') === 'version 1.2' &&
   document.querySelector('.shell')?.getAttribute('data-version') === '1.2'));
 ok('fresh sidebar uses the compact 176px default', Math.abs((await page.locator('.rail').evaluate((el) => el.getBoundingClientRect().width)) - 176) < 1);
 
@@ -160,11 +161,13 @@ ok('the collapse control sits to the right of the brand on the same centre line'
   if(!b||!t)return false;const br=b.getBoundingClientRect(),tr=t.getBoundingClientRect();
   return t.getBoundingClientRect().left >= br.right - 1 && Math.abs((br.top+br.height/2)-(tr.top+tr.height/2))<=1;
 }));
-ok('the release is a top-right badge',await page.evaluate(()=>{
-  const badge=document.querySelector('.brand-version'),head=document.querySelector('.rail-head');if(!badge||!head)return false;
-  const b=badge.getBoundingClientRect(),h=head.getBoundingClientRect(),style=getComputedStyle(badge);
-  return badge.textContent==='v1.2'&&Math.abs(b.right-(h.right-8))<=1&&Math.abs(b.top-(h.top+4))<=1&&parseFloat(style.borderRadius)>=10&&style.boxShadow!=='none';
+ok('the release uses a light superscript pill immediately after ttydterm',await page.evaluate(()=>{
+  const name=document.querySelector('.brand-name'),badge=document.querySelector('.brand-version');if(!badge||!name)return false;
+  const b=badge.getBoundingClientRect(),n=name.getBoundingClientRect(),style=getComputedStyle(badge);
+  return badge.textContent==='1.2'&&b.left>=n.right&&b.top<n.top+n.height/2&&b.height<n.height&&parseFloat(style.borderRadius)>=6&&style.boxShadow!=='none';
 }));
+ok('workspace icons have no decorative line markers',await page.evaluate(()=>
+  [...document.querySelectorAll('.folder-badge')].every((badge)=>getComputedStyle(badge,'::after').content==='none')));
 
 ok('each workspace row uses one triple-dot menu control', await page.evaluate(() =>
   [...document.querySelectorAll('.folder')].every((row)=>row.querySelectorAll('.folder-act').length===1 && !!row.querySelector('.folder-act svg[data-icon="menu"]'))));
@@ -213,6 +216,11 @@ ok('managed tmux sessions enable scoped OSC passthrough and Bash completion mark
 ok('completion status parser accepts only bounded ttydterm finish markers',await page.evaluate(()=>
   window.__parseCompletionStatus('D;0;ttydterm')===0 && window.__parseCompletionStatus('D;255;ttydterm')===255 &&
   window.__parseCompletionStatus('D;256;ttydterm')===null && window.__parseCompletionStatus('D;0;other')===null));
+ok('terminal paste restores xterm focus after inserting clipboard text',await page.evaluate(()=>{
+  const calls=[];window.__pasteIntoTerminal({paste:(text)=>calls.push('paste:'+text),focus:()=>calls.push('focus')},'hello');
+  window.__pasteIntoTerminal({paste:(text)=>calls.push('empty:'+text),focus:()=>calls.push('empty-focus')},'');
+  return calls.join('|')==='paste:hello|focus|empty-focus';
+}));
 const links = await page.locator('.surface:not([hidden]) a.term-link').count();
 ok('terminal URLs render as clickable links', links >= 2, String(links));
 const lsCells = await page.locator('.surface:not([hidden]) .ls > span').count();
@@ -468,6 +476,10 @@ ok('context menu opens at the right-click coordinate and remains pane-clamped',
 await page.keyboard.press('ArrowRight');
 ok('context menu supports arrow-key focus navigation',
   await page.evaluate(() => document.activeElement?.closest('.panepop') !== null));
+await page.keyboard.press('Escape');
+ok('Escape closes the right-click pane menu and returns focus to the terminal pane',await page.evaluate(()=>
+  document.querySelector('.panepop')===null&&document.activeElement?.classList.contains('pane')));
+await firstPane.click({ button: 'right', position: { x: 80, y: 100 } });
 await page.locator('.panepop .pico[aria-label="Split into 3 columns"]').click();
 await page.waitForTimeout(160);
 const afterSplit = await page.locator('.surface:not([hidden]) .pane').count();
@@ -485,6 +497,13 @@ const clones = splitCmds.slice(1, 3).filter((t) => t.includes('session ready')).
 ok('split panes do not clone the source command', clones === 0, `${clones} clone(s)`);
 const freshAreBash = splitCmds.slice(1, 3).every((t) => /\$ bash/.test(t));
 ok('fresh split panes default to bash', freshAreBash, splitCmds.slice(1, 3).map((t) => t.slice(0, 60)).join(' | '));
+ok('fresh split panes default to tmux when it is detected',await page.evaluate(()=>{
+  const ids=[...document.querySelectorAll('.surface:not([hidden]) .pane')]
+    .sort((a,b)=>a.getBoundingClientRect().left-b.getBoundingClientRect().left).slice(1,3).map((pane)=>pane.dataset.paneId);
+  const config=JSON.parse(localStorage.getItem('ttyd-workspace-v2')),panes=[];
+  const walk=(node)=>node.type==='pane'?panes.push(node):node.children.forEach(walk);config.folders.forEach((folder)=>walk(folder.layout));
+  return ids.every((id)=>panes.find((pane)=>pane.id===id)?.persist===true);
+}));
 await page.screenshot({ path: `${SHOTS}/02-split-3-columns.png` });
 
 console.log('\nresize');
@@ -758,41 +777,61 @@ await page.locator('dialog[open] .global-settings button[aria-label="Close globa
 await page.waitForTimeout(80);
 
 console.log('\ncommand completion attention');
-await page.evaluate(()=>Object.defineProperty(document,'hasFocus',{configurable:true,value:()=>true}));
-const firstCompletion=await page.evaluate(()=>{
-  const config=JSON.parse(localStorage.getItem('ttyd-workspace-v2')),folder=config.folders[0];
-  const pane=folder.layout.type==='pane'?folder.layout:folder.layout.children[0];
-  window.__reportCommandCompletion({folderId:folder.id,paneId:pane.id,exitStatus:0,duration:1200});
-  return {folderId:folder.id,paneId:pane.id};
-});
-await page.waitForTimeout(40);
-ok('every completion marks its workspace even when a system notification is suppressed',
-  (await page.locator('.folder').first().locator('.folder-complete').count())===1 &&
-  await page.evaluate(()=>window.__notifications.length===0));
-ok('completion indicators expose their count in the workspace accessible name',
-  (await page.locator('.folder-main').first().getAttribute('aria-label')).includes('1 completed command'));
+await page.evaluate(()=>{Object.defineProperty(document,'hasFocus',{configurable:true,value:()=>true});window.__notifications=[]});
 await page.locator('.folder-main').first().click();
-ok('opening a workspace clears its completion indicator',(await page.locator('.folder').first().locator('.folder-complete').count())===0);
-await page.evaluate(({folderId,paneId})=>{
+await page.waitForTimeout(40);
+const firstCompletion=await page.evaluate(()=>{
+  const config=JSON.parse(localStorage.getItem('ttyd-workspace-v2')),folder=config.folders[0],panes=[];
+  const walk=(node)=>node.type==='pane'?panes.push(node):node.children.forEach(walk);walk(folder.layout);
+  return {folderId:folder.id,paneId:panes[0].id,otherPaneId:panes[1].id};
+});
+await page.evaluate(({folderId,paneId})=>
+  window.__reportCommandCompletion({folderId,paneId,exitStatus:0,duration:6000}),firstCompletion);
+await page.evaluate(({folderId,otherPaneId})=>
+  window.__reportCommandCompletion({folderId,paneId:otherPaneId,exitStatus:0,duration:4999}),firstCompletion);
+await page.waitForTimeout(40);
+ok('short commands and long commands in the visible focused pane do not create attention markers',
+  (await page.locator('.folder').first().locator('.folder-complete').count())===0 &&
+  (await page.locator('.pane-complete').count())===0 && await page.evaluate(()=>window.__notifications.length===0));
+await page.evaluate(({folderId,otherPaneId})=>
+  window.__reportCommandCompletion({folderId,paneId:otherPaneId,exitStatus:0,duration:5000}),firstCompletion);
+await page.waitForTimeout(40);
+ok('a five-second command in an unfocused pane marks both the pane and workspace',
+  (await page.locator(`[data-pane-id="${firstCompletion.otherPaneId}"] .pane-complete`).count())===1 &&
+  (await page.locator('.folder').first().locator('.folder-complete').count())===1);
+ok('completion indicators expose their count in pane and workspace accessible names',
+  (await page.locator(`[data-pane-id="${firstCompletion.otherPaneId}"]`).getAttribute('aria-label')).includes('1 completed command') &&
+  (await page.locator('.folder-main').first().getAttribute('aria-label')).includes('1 completed command'));
+await page.locator(`[data-pane-id="${firstCompletion.otherPaneId}"]`).click();
+ok('focusing the marked pane clears its pane and workspace indicators',
+  (await page.locator(`[data-pane-id="${firstCompletion.otherPaneId}"] .pane-complete`).count())===0 &&
+  (await page.locator('.folder').first().locator('.folder-complete').count())===0);
+await page.evaluate(()=>window.__notifications=[]);
+await page.evaluate(({folderId,otherPaneId})=>{
   Object.defineProperty(document,'hasFocus',{configurable:true,value:()=>false});
-  window.__reportCommandCompletion({folderId,paneId,exitStatus:0,duration:1400});
+  window.__reportCommandCompletion({folderId,paneId:otherPaneId,exitStatus:0,duration:6000});
 },firstCompletion);
 await page.waitForTimeout(40);
-ok('an unfocused browser notifies even when the completed workspace is active',await page.evaluate(()=>window.__notifications.length===1));
+ok('an unfocused browser marks and notifies even when the completed pane is active',
+  (await page.locator(`[data-pane-id="${firstCompletion.otherPaneId}"] .pane-complete`).count())===1 &&
+  await page.evaluate(()=>window.__notifications.length===1));
 await page.evaluate(()=>{window.__notifications[0].onclick();window.__notifications=[];Object.defineProperty(document,'hasFocus',{configurable:true,value:()=>true})});
 await page.locator('.folder-main').nth(1).click();
-await page.evaluate(({folderId,paneId})=>window.__reportCommandCompletion({folderId,paneId,exitStatus:0,duration:1800}),firstCompletion);
+await page.evaluate(({folderId,paneId})=>window.__reportCommandCompletion({folderId,paneId,exitStatus:0,duration:6000}),firstCompletion);
 await page.waitForTimeout(40);
 ok('an inactive workspace completion creates one privacy-safe system notification',await page.evaluate(()=>{
   const notification=window.__notifications[0];
   return window.__notifications.length===1 && notification.title==='Command finished' &&
     notification.options.body==='Workspace “kalviumjr”' && !notification.options.body.includes('pi');
 }));
-ok('an inactive workspace displays its completion indicator',(await page.locator('.folder').first().locator('.folder-complete').count())===1);
+ok('an inactive workspace displays pane and workspace completion indicators',
+  (await page.locator(`[data-pane-id="${firstCompletion.paneId}"] .pane-complete`).count())===1 &&
+  (await page.locator('.folder').first().locator('.folder-complete').count())===1);
 await page.evaluate(()=>window.__notifications[0].onclick());
 await page.waitForTimeout(40);
-ok('clicking the notification opens the workspace, clears its indicator, and closes the notification',
+ok('clicking the notification opens and focuses the pane, clears its indicators, and closes the notification',
   (await page.locator('.folder').first().getAttribute('class')).includes('active') &&
+  (await page.locator(`[data-pane-id="${firstCompletion.paneId}"] .pane-complete`).count())===0 &&
   (await page.locator('.folder').first().locator('.folder-complete').count())===0 &&
   await page.evaluate(()=>window.__notifications[0].closed===true));
 
@@ -1020,12 +1059,31 @@ await page.waitForSelector('dialog[open]');
 ok('new-folder route is not stomped', /#\/new/.test(page.url()), page.url());
 const duringNew = await page.locator('.folder.active .folder-name').textContent();
 ok('active folder survives behind #/new', duringNew === beforeDialogs, `${beforeDialogs} -> ${duringNew}`);
+const newFolderTmux=page.locator('dialog[open] input[type=checkbox]');
+ok('new workspaces default to detected tmux but allow opt-out',await newFolderTmux.isChecked()&&await newFolderTmux.isEnabled());
 await page.locator('dialog[open] .btn', { hasText: 'Cancel' }).click();
 await page.waitForTimeout(180);
 ok('new-folder dialog closes on cancel', (await page.locator('dialog[open]').count()) === 0);
 ok('cancel created no folder', (await page.locator('.folder').count()) === folderCountBefore);
 ok('cancel kept the active folder',
   (await page.locator('.folder.active .folder-name').textContent()) === beforeDialogs);
+
+await page.locator('.ico[aria-label="New folder"]').click();
+await page.waitForSelector('dialog[open]');
+await page.locator('dialog[open] input[type=checkbox]').uncheck();
+await page.locator('dialog[open] input[type=text]').nth(1).fill('tmux-opt-out');
+await page.locator('dialog[open] .btn.primary', {hasText:'Create'}).click();
+await page.waitForTimeout(180);
+ok('a new workspace respects the tmux opt-out',await page.evaluate(()=>{
+  const config=JSON.parse(localStorage.getItem('ttyd-workspace-v2')),folder=config.folders.at(-1);
+  return folder.name==='tmux-opt-out'&&folder.layout.type==='pane'&&folder.layout.persist===false;
+}));
+await page.locator('.folder.active').hover();
+await page.locator('.folder.active .folder-act').click();
+await page.locator('.folder.active .folder-menu [role=menuitem]',{hasText:'Settings'}).click();
+await page.locator('dialog[open] .btn',{hasText:'Delete folder'}).click();
+await page.waitForTimeout(180);
+ok('the opt-out test workspace can be removed cleanly',(await page.locator('.folder').count())===folderCountBefore);
 
 await page.locator('.folder').first().click();
 await page.waitForTimeout(180);
@@ -1240,6 +1298,13 @@ await demo.goto(RAW_BASE, { waitUntil: 'networkidle' });
 await demo.waitForSelector('.setup-notice');
 await demo.waitForSelector('.surface:not([hidden]) .doc-term[data-doc="readme"]');
 ok('static documentation has no console/page errors', demoErrors.length === 0, demoErrors.join(' | '));
+await demo.locator('.ico[aria-label="New folder"]').click();
+await demo.waitForSelector('dialog[open]');
+ok('static mode resolves tmux as unavailable instead of checking forever',await demo.evaluate(()=>{
+  const input=document.querySelector('dialog[open] input[type=checkbox]'),dialog=document.querySelector('dialog[open]');
+  return !!input&&input.disabled&&!input.checked&&dialog?.textContent?.includes('tmux not found')&&!dialog.textContent.includes('Checking for tmux');
+}));
+await demo.locator('dialog[open] .btn',{hasText:'Cancel'}).click();
 
 const docNames = await demo.$$eval('.folder-name', (nodes) => nodes.map((node) => node.textContent));
 ok('documentation has four focused pages in reading order',
@@ -1445,6 +1510,18 @@ await transitionPage.waitForSelector('.surface:not([hidden]) .xterm-term');
 ok('probing to real ttyd changes renderer without violating React hook order',
   !transitionMessages.some((message) => /Rendered (fewer|more) hooks|order of Hooks/i.test(message)),
   transitionMessages.filter((message) => /hook/i.test(message)).join(' | '));
+await transitionPage.evaluate(()=>Object.defineProperty(navigator,'clipboard',{configurable:true,value:{readText:async()=> 'from clipboard'}}));
+const transitionPane=transitionPage.locator('.surface:not([hidden]) .pane').first();
+await transitionPane.click({button:'right',position:{x:80,y:80}});
+await transitionPage.keyboard.press('Escape');
+await transitionPage.waitForFunction(()=>document.activeElement?.classList.contains('xterm-helper-textarea'));
+ok('Escape from the right-click menu returns actual DOM focus to xterm input',await transitionPage.evaluate(()=>
+  document.activeElement?.classList.contains('xterm-helper-textarea')));
+await transitionPane.click({button:'right',position:{x:80,y:80}});
+await transitionPage.locator('.panepop [aria-label="Paste"]').click();
+await transitionPage.waitForFunction(()=>document.activeElement?.classList.contains('xterm-helper-textarea'));
+ok('right-click paste returns actual DOM focus to xterm input',await transitionPage.evaluate(()=>
+  document.activeElement?.classList.contains('xterm-helper-textarea')));
 await transitionContext.close();
 
 const deniedContext=await browser.newContext();

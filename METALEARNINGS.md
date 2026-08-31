@@ -151,3 +151,15 @@ These rules apply to terminal workspaces and other single-file browser tools.
 48. Social preview metadata needs absolute public image URLs, explicit image
     dimensions, and useful alt text. Assert the metadata and the source image
     dimensions together so a replaced screenshot cannot silently break cards.
+
+49. Derive attention indicators from the exact interaction target. A workspace
+    summary should aggregate pane state, while focusing one pane clears only
+    that pane. Ignore short background work so the marker stays meaningful.
+
+50. Clipboard actions launched from custom menus must restore focus through the
+    terminal's public API after the asynchronous clipboard read and paste. A
+    visual pane ring does not prove that the terminal input can receive typing.
+
+51. Capability-driven defaults should wait for a real probe, apply only to newly
+    created resources, and expose an explicit opt-out. Never rewrite restored
+    user choices when the environment changes.

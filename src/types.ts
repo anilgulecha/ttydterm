@@ -104,7 +104,7 @@ export type Capabilities =
 
 export type TmuxState =
   | { state: 'probing' }
-  | { state: 'present'; version: string }
+  | { state: 'present' }
   | { state: 'absent' };
 
 export interface PaneLaunchOptions {

@@ -85,8 +85,8 @@
   .brand-mark svg { width: 17px; height: 17px; }
 
   .brand-block {
-    flex:1;min-width:0;height:36px;padding:0 42px 0 18px;
-    display:flex;align-items:center;
+    flex:1;min-width:0;height:36px;padding:0 38px 0 18px;
+    display:flex;align-items:center;gap:3px;
   }
   .brand-name {
     min-width:0;
@@ -95,11 +95,11 @@
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   }
   .brand-version {
-    position:absolute;right:8px;top:4px;
+    align-self:flex-start;flex:0 0 auto;margin-top:4px;
     display:inline-flex;align-items:center;justify-content:center;
-    min-width:34px;height:19px;padding:0 6px;border-radius:999px;
+    min-width:20px;height:13px;padding:0 4px;border-radius:999px;
     background:var(--ui-hover);color:var(--ui-ink);box-shadow:inset 0 0 0 1px var(--ui-edge);
-    font:700 10px/1 var(--mono);letter-spacing:.02em;white-space:nowrap;
+    font:700 8px/1 var(--mono);letter-spacing:0;white-space:nowrap;
   }
   .rail-toggle {
     position:absolute;right:6px;bottom:3px;
@@ -286,6 +286,10 @@
     transition: box-shadow .14s ease;
   }
   .pane.focused .pane-edge { box-shadow: inset 0 0 0 2px var(--t-ring); }
+  .pane-complete {
+    position:absolute;z-index:10;top:8px;left:8px;width:8px;height:8px;border-radius:50%;
+    pointer-events:none;background:var(--t-yellow);box-shadow:0 0 0 2px var(--t-bg);
+  }
   @media (prefers-reduced-motion: reduce) { .pane-edge { transition: none; } }
 
   .term {
@@ -670,9 +674,6 @@
 .pattern-cross::before { background-image:linear-gradient(var(--t-pattern) .7px,transparent .7px),linear-gradient(90deg,var(--t-pattern) .7px,transparent .7px);background-size:32px 32px;background-position:16px 16px; }
 .pattern-waves::before { background-image:radial-gradient(ellipse at center,transparent 64%,var(--t-pattern) 66%,transparent 68%);background-size:30px 12px; }
 .pattern-bricks::before { background-image:linear-gradient(var(--t-pattern) .7px,transparent .7px),linear-gradient(90deg,var(--t-pattern) .7px,transparent .7px);background-size:28px 14px;background-position:0 0,14px 7px; }
-.folder-badge::after { content:"";position:absolute;width:20px;height:3px;bottom:3px;left:16px;border-radius:2px;background:currentColor;opacity:.75; }
-.folder:nth-child(3n+2) .folder-badge::after { background:repeating-linear-gradient(90deg,currentColor 0 2px,transparent 2px 4px); }
-.folder:nth-child(3n) .folder-badge::after { height:4px;background:radial-gradient(currentColor 1px,transparent 1px);background-size:4px 4px; }
 .pattern-choices { display:grid;grid-template-columns:repeat(4,1fr);gap:6px; }
 .pattern-chip { height:46px;border-radius:7px;background:var(--ui-field);box-shadow:inset 0 0 0 1px var(--ui-edge);position:relative;overflow:hidden;color:var(--ui-muted); }
 .pattern-chip::before { content:"";position:absolute;inset:0;opacity:1;background-color:var(--ui-field); }

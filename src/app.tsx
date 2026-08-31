@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { paneLaunchCommand, shellCwd, tmuxLaunchCommand, ttydLaunchCommand } from './commands';
+import { paneLaunchCommand, shellCwd, shellQuote, tmuxLaunchCommand, ttydLaunchCommand } from './commands';
 import { DOC_PAGES, docPage } from './docs';
 import type { DocBlock, DocPage, DocSection, DocSpan } from './docs';
 import { Button, CheckboxField, Field, FieldGroup, ModalActions, ModalForm, ModalShell } from './modal';
@@ -48,6 +48,7 @@ window.__contrastAudit = () => {
     out.push({ theme:name, key:'ui-text/raised', kind:'text', ratio:+contrast(t.ui.text, t.ui.raised).toFixed(2), min:4.5 });
     out.push({ theme:name, key:'ui-muted/raised', kind:'text', ratio:+contrast(t.ui.muted, t.ui.raised).toFixed(2), min:4.5 });
     out.push({ theme:name, key:'ui-focus/sidebar', kind:'ui', ratio:+contrast(t.ui.focus, t.ui.sidebar).toFixed(2), min:3 });
+    out.push({ theme:name, key:'ui-focus/raised', kind:'ui', ratio:+contrast(t.ui.focus, t.ui.raised).toFixed(2), min:3 });
     out.push({ theme:name, key:'ui-danger/raised', kind:'text', ratio:+contrast(t.ui.danger, t.ui.raised).toFixed(2), min:4.5 });
     out.push({ theme:name, key:'ui-warning/raised', kind:'text', ratio:+contrast(t.ui.warning, t.ui.raised).toFixed(2), min:4.5 });
     out.push({ theme:name, key:'ui-success/raised', kind:'text', ratio:+contrast(t.ui.success, t.ui.raised).toFixed(2), min:4.5 });
@@ -271,18 +272,37 @@ async function detectRuntime(): Promise<Runtime> {
     return { mode:'ttyd', token:json.token, endpoints };
   } catch { return { mode:'demo', reason:'No ttyd server was detected.' }; }
 }
-async function probeCapabilities(runtime: Runtime, timeout=5000): Promise<Capabilities> {
+interface CapabilityProbeResult { home:string; cwd:string; shell:string; tmux:boolean }
+const capabilityProbeCommand=(marker:string):string => {
+  const script=`command -v tmux >/dev/null 2>&1 && __ttydterm_tmux=1 || __ttydterm_tmux=0; printf '\\0%s\\0%s\\0%s\\0%s\\0%s\\0%s\\0' '${marker}' "$HOME" "$PWD" "$SHELL" "$__ttydterm_tmux" '${marker}'; unset __ttydterm_tmux`;
+  return `sh -c ${shellQuote(script)}\r`;
+};
+const parseCapabilityProbeOutput=(output:string,marker:string):CapabilityProbeResult|null=>{
+  const boundary='\0'+marker+'\0',start=output.lastIndexOf(boundary);
+  if(start<0)return null;
+  const previous=output.lastIndexOf(boundary,start-1);
+  if(previous<0)return null;
+  const values=output.slice(previous+boundary.length,start).split('\0');
+  if(values.length!==4||(values[3]!=='0'&&values[3]!=='1'))return null;
+  return {home:values[0]||'~',cwd:values[1]||'~',shell:values[2]||'/bin/bash',tmux:values[3]==='1'};
+};
+window.__capabilityProbeCommand=capabilityProbeCommand;
+window.__parseCapabilityProbeOutput=parseCapabilityProbeOutput;
+async function probeCapabilities(runtime: Runtime, timeout=8000): Promise<Capabilities> {
   if(runtime.mode!=='ttyd') throw new Error('ttyd is not connected');
   const connected = runtime;
   const marker='__TTYDTERM_PROBE_'+Math.random().toString(36).slice(2)+'__';
   return new Promise<Capabilities>((resolve,reject)=>{
-    const socket=new WebSocket(connected.endpoints.ws,['tty']),encoder=new TextEncoder(),decoder=new TextDecoder();let output='',sent=false;
-    const timer=setTimeout(()=>{socket.close();reject(new Error('No writable shell response. Restart ttyd with --writable.'))},timeout);
+    const socket=new WebSocket(connected.endpoints.ws,['tty']),encoder=new TextEncoder(),decoder=new TextDecoder();let output='',sent=false,settled=false;
+    const finish=(result:CapabilityProbeResult)=>{if(settled)return;settled=true;clearTimeout(timer);socket.close(1000);resolve({state:'ready',...result,writable:true})};
+    const fail=(message:string)=>{if(settled)return;settled=true;clearTimeout(timer);socket.close();reject(new Error(message))};
+    const timer=setTimeout(()=>fail('No writable shell response. Restart ttyd with --writable, then check again.'),timeout);
     const send=(text: string)=>{const bytes=encoder.encode(text),payload=new Uint8Array(bytes.length+1);payload[0]=48;payload.set(bytes,1);socket.send(payload)};
     socket.binaryType='arraybuffer';
     socket.onopen=()=>socket.send(encoder.encode(JSON.stringify({AuthToken:connected.token,columns:80,rows:24})));
-    socket.onmessage=(event: MessageEvent<ArrayBuffer>)=>{const bytes=new Uint8Array(event.data);if(String.fromCharCode(bytes[0])!=='0')return;output+=decoder.decode(bytes.slice(1),{stream:true});if(!sent){sent=true;send(`printf '${marker}|%s|%s|%s|' "$HOME" "$PWD" "$SHELL"; command -v tmux >/dev/null && printf '1' || printf '0'; printf '|${marker}\\n'\r`)}const start=output.indexOf(marker+'|'),end=output.indexOf('|'+marker,start+marker.length+1);if(start>=0&&end>start){clearTimeout(timer);const values=output.slice(start+marker.length+1,end).split('|');socket.close(1000);resolve({state:'ready',home:values[0]||'~',cwd:values[1]||'~',shell:values[2]||'/bin/bash',tmux:values[3]==='1',writable:true})}};
-    socket.onerror=()=>{clearTimeout(timer);reject(new Error('Capability probe connection failed'))};
+    socket.onmessage=(event: MessageEvent<ArrayBuffer>)=>{const bytes=new Uint8Array(event.data);if(String.fromCharCode(bytes[0])!=='0')return;output+=decoder.decode(bytes.slice(1),{stream:true});if(!sent){sent=true;send(capabilityProbeCommand(marker))}const result=parseCapabilityProbeOutput(output,marker);if(result)finish(result)};
+    socket.onerror=()=>fail('Could not open a shell connection for the tmux check.');
+    socket.onclose=()=>fail('The shell connection closed before the tmux check finished.');
   });
 }
 
@@ -821,8 +841,8 @@ function useRoute() {
 
 const tmuxState = (capabilities:Capabilities, runtime:Runtime):TmuxState => capabilities.state === 'ready'
   ? capabilities.tmux ? { state:'present' } : { state:'absent' }
-  : capabilities.state === 'error' || runtime.mode === 'demo' || runtime.mode === 'file'
-    ? { state:'absent' } : { state:'probing' };
+  : capabilities.state === 'error' ? { state:'error', message:capabilities.error }
+  : runtime.mode === 'demo' || runtime.mode === 'file' ? { state:'absent' } : { state:'probing' };
 
 type PaneMenu = { source: 'trigger' | 'context'; x: number; y: number };
 interface FocusRequest { id: string; n?: number; nonce?: number }
@@ -1178,10 +1198,22 @@ function ThemeChoice({ label, value, onChange, folderTheme }: {
 
 const initials = (label: string) => label.replace(/[^a-z0-9]+/gi, '').slice(0, 2) || '··';
 
-function FolderDialog({ folder, isNew, tmux, onChange, onCreate, onDelete, onClose, canDelete }: {
+function TmuxStatusHint({ tmux, present, absent, onCheck }: {
+  tmux:TmuxState;
+  present:string;
+  absent:string;
+  onCheck?:()=>void;
+}) {
+  const text=tmux.state==='present' ? present : tmux.state==='probing' ? 'Checking for tmux…'
+    : tmux.state==='error' ? 'Could not check for tmux: '+tmux.message : absent;
+  return <>{text}{onCheck&&tmux.state!=='present'&&tmux.state!=='probing' ? <button type="button" className="hint-action" onClick={onCheck}>Check again</button> : null}</>;
+}
+
+function FolderDialog({ folder, isNew, tmux, onCheckTmux, onChange, onCreate, onDelete, onClose, canDelete }: {
   folder: Folder;
   isNew?: boolean;
   tmux?: TmuxState;
+  onCheckTmux?:()=>void;
   onChange?: (patch: Partial<Folder>) => void;
   onCreate?: (folder: Folder, persist: boolean) => void;
   onDelete?: () => void;
@@ -1243,15 +1275,15 @@ function FolderDialog({ folder, isNew, tmux, onChange, onCreate, onDelete, onClo
           </div>
         )}
       </FieldGroup>
-      {isNew ? <CheckboxField
+      {isNew && tmux ? <CheckboxField
         label="Keep the first terminal alive with tmux"
         checked={persist}
-        disabled={tmux?.state !== 'present'}
+        disabled={tmux.state !== 'present'}
         onChange={(checked)=>{persistTouched.current=true;setPersist(checked)}}
-        hintTone={tmux?.state === 'absent' ? 'warn' : 'default'}
-        hint={tmux?.state === 'present' ? 'Installed and enabled by default. Uncheck to opt out.'
-          : tmux?.state === 'probing' ? 'Checking for tmux…'
-          : 'tmux not found: this terminal dies with the tab.'}
+        hintTone={tmux.state === 'absent'||tmux.state === 'error' ? 'warn' : 'default'}
+        hint={<TmuxStatusHint tmux={tmux} onCheck={onCheckTmux}
+          present="Installed and enabled by default. Uncheck to opt out."
+          absent="tmux is not in the PATH used by ttyd’s login shell. This terminal dies with the tab." />}
       /> : null}
       <ThemeChoice label="Theme" value={draft.theme || 'paper'} onChange={(theme) => put({ theme: theme || 'paper' })} />
       <FieldGroup label="Terminal pattern">
@@ -1269,10 +1301,11 @@ function FolderDialog({ folder, isNew, tmux, onChange, onCreate, onDelete, onClo
   );
 }
 
-function PaneSettings({ node, folder, tmux, onChange, onClose }: {
+function PaneSettings({ node, folder, tmux, onCheckTmux, onChange, onClose }: {
   node: PaneNode;
   folder: Folder;
   tmux: TmuxState;
+  onCheckTmux?:()=>void;
   onChange: (patch: Partial<PaneNode>) => void;
   onClose: () => void;
 }) {
@@ -1297,12 +1330,12 @@ function PaneSettings({ node, folder, tmux, onChange, onClose }: {
       <CheckboxField
         label="Run in tmux"
         checked={node.persist}
-        disabled={tmux.state === 'absent'}
+        disabled={tmux.state !== 'present'}
         onChange={(persist) => onChange({ persist })}
-        hintTone={tmux.state === 'absent' ? 'warn' : 'default'}
-        hint={tmux.state === 'present' ? 'Survives closing the tab.'
-          : tmux.state === 'probing' ? 'Checking for tmux…'
-          : 'tmux not found: this pane dies with the tab.'}
+        hintTone={tmux.state === 'absent'||tmux.state === 'error' ? 'warn' : 'default'}
+        hint={<TmuxStatusHint tmux={tmux} onCheck={onCheckTmux}
+          present="Survives closing the tab."
+          absent="tmux is not in the PATH used by ttyd’s login shell. This pane dies with the tab." />}
       />
     </ModalForm>
   );
@@ -1340,7 +1373,10 @@ function FirstRunDialog({ capabilities, onProbe, onCreate }: {
         <input id={nameId} value={name} onChange={(e) => setName(e.target.value)} />
       </Field>
       <CheckboxField
-        label={'Keep panes alive with tmux ' + (capabilities.state === 'unknown' ? '(check environment first)' : capabilities.tmux ? '(installed)' : '(not found)')}
+        label={'Keep panes alive with tmux ' + (capabilities.state === 'unknown' ? '(check environment first)'
+          : capabilities.state === 'probing' ? '(checking)'
+          : capabilities.state === 'error' ? '(check failed)'
+          : capabilities.tmux ? '(installed)' : '(not found)')}
         checked={persist} disabled={!capabilities.tmux} onChange={setPersist}
         hint={capabilities.error} hintTone={capabilities.error ? 'warn' : 'default'}
       />
@@ -1575,12 +1611,13 @@ function App() {
   const setUi = useCallback((patch: Partial<UiState>) => setConfig((c) => ({ ...c, ui: { ...c.ui, ...patch } })), []);
   const setRailOpen = useCallback((v: boolean | ((previous:boolean)=>boolean)) => setUi({ railOpen: typeof v === 'function' ? v(railOpen) : v }), [railOpen, setUi]);
 
-  useEffect(() => { detectRuntime().then(setRuntime); }, []);
-  useEffect(()=>{
-    if(runtime.mode!=='ttyd'||capabilities.state!=='unknown')return;
+  const checkCapabilities=useCallback(()=>{
+    if(runtime.mode!=='ttyd')return;
     setCapabilities({state:'probing',tmux:false,home:'~',cwd:'~'});
     probeCapabilities(runtime).then(setCapabilities).catch((error:unknown)=>setCapabilities({state:'error',tmux:false,home:'~',cwd:'~',error:error instanceof Error?error.message:String(error)}));
-  },[runtime,capabilities.state]);
+  },[runtime]);
+  useEffect(() => { detectRuntime().then(setRuntime); }, []);
+  useEffect(()=>{if(runtime.mode==='ttyd'&&capabilities.state==='unknown')checkCapabilities()},[runtime,capabilities.state,checkCapabilities]);
   useEffect(() => { if(configured) localStorage.setItem(STORE_KEY, JSON.stringify(config)); }, [config, configured]);
 
   const folders = config.folders;
@@ -1898,12 +1935,7 @@ function App() {
       <ModalShell open={runtime.mode === 'ttyd' && !configured} dismissible={false} onClose={() => {}}>
         <FirstRunDialog
           capabilities={capabilities}
-          onProbe={() => {
-            setCapabilities({ state: 'probing', tmux: false, home: '~', cwd: '~' });
-            probeCapabilities(runtime)
-              .then(setCapabilities)
-              .catch((error: unknown) => setCapabilities({ state: 'error', tmux: false, home: '~', cwd: '~', error: error instanceof Error ? error.message : String(error) }));
-          }}
+          onProbe={checkCapabilities}
           onCreate={(cwd, name, persist) => {
             const folder: Folder = { id: uid('f-'), name, cwd, icon: 'terminal', pattern: 'dots', theme: 'paper', layout: pane('exec bash -l', persist) };
             setConfig({ version: CONFIG_VERSION, ui: { railWidth: RAIL_DEFAULT, railOpen: true, fontSize: 13, fontWeight:'regular', notifyOnCommandFinish:false }, folders: [folder] });
@@ -1919,7 +1951,7 @@ function App() {
       </ModalShell>
 
       <ModalShell open={!!routedPane} onClose={closeDialog}>
-        {routedPane ? <PaneSettings node={routedPane} folder={active} tmux={tmux} onChange={(patch) => onPaneChange(routedPane.id, patch)} onClose={closeDialog}/> : null}
+        {routedPane ? <PaneSettings node={routedPane} folder={active} tmux={tmux} onCheckTmux={runtime.mode==='ttyd'?checkCapabilities:undefined} onChange={(patch) => onPaneChange(routedPane.id, patch)} onClose={closeDialog}/> : null}
       </ModalShell>
 
       <ModalShell open={showFolderDlg} onClose={closeDialog}>
@@ -1930,7 +1962,7 @@ function App() {
 
       <ModalShell open={showNewDlg && !!newDraft} onClose={() => go('f', active.id)}>
         {newDraft ? (
-          <FolderDialog folder={{...newDraft,layout:null}} isNew tmux={tmux} onClose={() => go('f', active.id)}
+          <FolderDialog folder={{...newDraft,layout:null}} isNew tmux={tmux} onCheckTmux={runtime.mode==='ttyd'?checkCapabilities:undefined} onClose={() => go('f', active.id)}
             onCreate={(next,persist) => {
               const folder: Folder = { ...next, theme: next.theme || active.theme || 'paper', layout: pane('bash', persist) };
               setConfig((c) => ({ ...c, folders: c.folders.concat(folder) }));

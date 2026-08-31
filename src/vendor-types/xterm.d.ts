@@ -80,6 +80,8 @@ interface Window {
   __tmuxLaunchCommand?: (cwd: string, session: string, command?:string, shellIntegration?:boolean) => string;
   __xtermAppearance?: (element: HTMLElement) => { fontSize: number; fontWeight:number; theme: XtermThemeColors };
   __parseCompletionStatus?: (data: string) => number | null;
+  __capabilityProbeCommand?: (marker:string)=>string;
+  __parseCapabilityProbeOutput?: (output:string,marker:string)=>{home:string;cwd:string;shell:string;tmux:boolean}|null;
   __pasteIntoTerminal?: (term:XtermTerminal, text:string) => void;
   __reportCommandCompletion?: (event: { folderId:string; paneId:string; exitStatus:number; duration:number }) => void;
 }

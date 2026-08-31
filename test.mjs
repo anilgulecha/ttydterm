@@ -1,6 +1,6 @@
 
-import { execSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
+import { execFileSync, execSync } from 'node:child_process';
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 
 const gRoot = execSync('npm root -g').toString().trim();
 const { chromium } = await import(`${gRoot}/playwright/index.mjs`);
@@ -106,10 +106,10 @@ ok('social previews use the published product screenshot', await page.evaluate((
     content('meta[name="twitter:image"]')==='https://www.gulecha.org/ttydterm/docs/ttydterm.png';
 }));
 ok('hash route settled on a folder', /#\/f\//.test(page.url()), page.url());
-ok('release 1.2 is a compact superscript beside the wordmark and exposed on the shell', await page.evaluate(() =>
-  document.querySelector('.brand-version')?.textContent === '1.2' &&
-  document.querySelector('.brand-version')?.getAttribute('aria-label') === 'version 1.2' &&
-  document.querySelector('.shell')?.getAttribute('data-version') === '1.2'));
+ok('release 1.3 is a compact superscript beside the wordmark and exposed on the shell', await page.evaluate(() =>
+  document.querySelector('.brand-version')?.textContent === '1.3' &&
+  document.querySelector('.brand-version')?.getAttribute('aria-label') === 'version 1.3' &&
+  document.querySelector('.shell')?.getAttribute('data-version') === '1.3'));
 ok('fresh sidebar uses the compact 176px default', Math.abs((await page.locator('.rail').evaluate((el) => el.getBoundingClientRect().width)) - 176) < 1);
 
 const folderNames = await page.$$eval('.folder-name', (n) => n.map((e) => e.textContent));
@@ -164,10 +164,13 @@ ok('the collapse control sits to the right of the brand on the same centre line'
 ok('the release uses a light superscript pill immediately after ttydterm',await page.evaluate(()=>{
   const name=document.querySelector('.brand-name'),badge=document.querySelector('.brand-version');if(!badge||!name)return false;
   const b=badge.getBoundingClientRect(),n=name.getBoundingClientRect(),style=getComputedStyle(badge);
-  return badge.textContent==='1.2'&&b.left>=n.right&&b.top<n.top+n.height/2&&b.height<n.height&&parseFloat(style.borderRadius)>=6&&style.boxShadow!=='none';
+  return badge.textContent==='1.3'&&b.left>=n.right&&b.top<n.top+n.height/2&&b.height<n.height&&parseFloat(style.borderRadius)>=6&&style.boxShadow!=='none';
 }));
 ok('workspace icons have no decorative line markers',await page.evaluate(()=>
   [...document.querySelectorAll('.folder-badge')].every((badge)=>getComputedStyle(badge,'::after').content==='none')));
+ok('workspace icons use the larger 19px presentation',await page.evaluate(()=>{
+  const icon=document.querySelector('.folder-badge svg');return !!icon&&icon.getBoundingClientRect().width===19&&icon.getBoundingClientRect().height===19;
+}));
 
 ok('each workspace row uses one triple-dot menu control', await page.evaluate(() =>
   [...document.querySelectorAll('.folder')].every((row)=>row.querySelectorAll('.folder-act').length===1 && !!row.querySelector('.folder-act svg[data-icon="menu"]'))));
@@ -216,6 +219,32 @@ ok('managed tmux sessions enable scoped OSC passthrough and Bash completion mark
 ok('completion status parser accepts only bounded ttydterm finish markers',await page.evaluate(()=>
   window.__parseCompletionStatus('D;0;ttydterm')===0 && window.__parseCompletionStatus('D;255;ttydterm')===255 &&
   window.__parseCompletionStatus('D;256;ttydterm')===null && window.__parseCompletionStatus('D;0;other')===null));
+ok('capability probe command keeps its complete response frame out of echoed input',await page.evaluate(()=>{
+  const marker='__TTYDTERM_PROBE_test__',command=window.__capabilityProbeCommand(marker),boundary='\0'+marker+'\0';
+  return !command.includes(boundary)&&command.includes("command -v tmux")&&command.endsWith('\r');
+}));
+ok('capability parser ignores echoed probe text and accepts only the complete shell result',await page.evaluate(()=>{
+  const marker='__TTYDTERM_PROBE_test__',command=window.__capabilityProbeCommand(marker);
+  const real='noise\0'+marker+'\0/home/a\0/work/project\0/bin/bash\0'+'1\0'+marker+'\0prompt';
+  const parsed=window.__parseCapabilityProbeOutput(command+'\r\n'+real,marker);
+  return parsed?.home==='/home/a'&&parsed.cwd==='/work/project'&&parsed.shell==='/bin/bash'&&parsed.tmux===true&&
+    window.__parseCapabilityProbeOutput(command+'\r\n',marker)===null&&
+    window.__parseCapabilityProbeOutput('\0'+marker+'\0/a\0/b\0/c\0x\0'+marker+'\0',marker)===null;
+}));
+ok('capability parser waits through fragmented frames for the final boundary',await page.evaluate(()=>{
+  const marker='__TTYDTERM_PROBE_frag__',parts=['echoed command\r\nnoise\0'+marker.slice(0,12),marker.slice(12)+'\0/home/a\0/work/project\0/bin/bash\0','1\0'+marker.slice(0,9),marker.slice(9)+'\0prompt'];
+  let output='';const partial=[];for(const part of parts){output+=part;partial.push(window.__parseCapabilityProbeOutput(output,marker))}
+  return partial.slice(0,-1).every((result)=>result===null)&&partial.at(-1)?.tmux===true;
+}));
+const probeShellCommand=await page.evaluate(()=>window.__capabilityProbeCommand('__TTYDTERM_PROBE_shell__').slice(0,-1));
+const probeBin='/tmp/ttydterm-probe-bin';rmSync(probeBin,{recursive:true,force:true});mkdirSync(probeBin);symlinkSync('/bin/sh',probeBin+'/sh');
+writeFileSync(probeBin+'/tmux','#!/bin/sh\nexit 0\n');chmodSync(probeBin+'/tmux',0o755);
+const runProbe=()=>execFileSync('/bin/sh',['-c',probeShellCommand],{env:{...process.env,PATH:probeBin},encoding:'utf8'});
+const presentProbe=runProbe();rmSync(probeBin+'/tmux');const absentProbe=runProbe();rmSync(probeBin,{recursive:true,force:true});
+ok('probe executes through POSIX sh and distinguishes PATH-present from PATH-absent tmux',await page.evaluate(({present,absent})=>{
+  const marker='__TTYDTERM_PROBE_shell__',parse=window.__parseCapabilityProbeOutput;
+  return parse(present,marker)?.tmux===true&&parse(absent,marker)?.tmux===false;
+},{present:presentProbe,absent:absentProbe}));
 ok('terminal paste restores xterm focus after inserting clipboard text',await page.evaluate(()=>{
   const calls=[];window.__pasteIntoTerminal({paste:(text)=>calls.push('paste:'+text),focus:()=>calls.push('focus')},'hello');
   window.__pasteIntoTerminal({paste:(text)=>calls.push('empty:'+text),focus:()=>calls.push('empty-focus')},'');
@@ -463,6 +492,8 @@ const popBleed = await page.evaluate(() => {
 });
 ok('pane menu is fully opaque over the terminal',
   popBleed.op === '1' && /^rgb\(/.test(popBleed.bg), JSON.stringify(popBleed));
+ok('right-click menu icons use the larger 17px presentation',await page.evaluate(()=>
+  [...document.querySelectorAll('.panepop .pico svg')].every((icon)=>icon.getBoundingClientRect().width===17&&icon.getBoundingClientRect().height===17)));
 
 await page.keyboard.press('Escape');
 const paneBoxForMenu = await firstPane.boundingBox();
@@ -1302,7 +1333,7 @@ await demo.locator('.ico[aria-label="New folder"]').click();
 await demo.waitForSelector('dialog[open]');
 ok('static mode resolves tmux as unavailable instead of checking forever',await demo.evaluate(()=>{
   const input=document.querySelector('dialog[open] input[type=checkbox]'),dialog=document.querySelector('dialog[open]');
-  return !!input&&input.disabled&&!input.checked&&dialog?.textContent?.includes('tmux not found')&&!dialog.textContent.includes('Checking for tmux');
+  return !!input&&input.disabled&&!input.checked&&dialog?.textContent?.includes('tmux is not in the PATH')&&!dialog.textContent.includes('Checking for tmux');
 }));
 await demo.locator('dialog[open] .btn',{hasText:'Cancel'}).click();
 
@@ -1380,7 +1411,8 @@ const usingText = await demo.locator('.surface:not([hidden]) .doc-body').textCon
 ok('Using it includes four scoped package managers, download, localhost auth and tmux limits',
   ['brew install ttyd tmux','sudo apt install ttyd tmux','sudo dnf install ttyd tmux','sudo pacman -S ttyd tmux',
    'curl -fL https://www.gulecha.org/ttydterm/index.html','http://localhost:7681',
-   'Replace user:password with credentials you choose','while the tmux server and session run'].every((text) => usingText.includes(text)));
+   'Replace user:password with credentials you choose','PATH used by ttyd’s login shell','command -v tmux',
+   'while the tmux server and session run'].every((text) => usingText.includes(text)));
 ok('Using it renders the exact banner launch command',
   (await demo.locator('.surface:not([hidden]) .doc-command code').last().textContent()) === bannerCommand);
 
@@ -1522,6 +1554,14 @@ await transitionPage.locator('.panepop [aria-label="Paste"]').click();
 await transitionPage.waitForFunction(()=>document.activeElement?.classList.contains('xterm-helper-textarea'));
 ok('right-click paste returns actual DOM focus to xterm input',await transitionPage.evaluate(()=>
   document.activeElement?.classList.contains('xterm-helper-textarea')));
+await transitionPane.click({button:'right',position:{x:80,y:80}});
+await transitionPage.locator('.panepop [aria-label="Pane settings"]').click();
+await transitionPage.waitForFunction(()=>document.querySelector('.panesettings')?.textContent?.includes('Could not check for tmux'));
+ok('a probe failure is explained and retryable instead of being reported as tmux absent',await transitionPage.evaluate(()=>{
+  const dialog=document.querySelector('.panesettings'),retry=dialog?.querySelector('.hint-action'),box=retry?.getBoundingClientRect();
+  return dialog?.textContent?.includes('Could not check for tmux')&&!dialog.textContent.includes('not in the PATH')&&
+    !!retry&&box.height>=24&&box.width>=24;
+}));
 await transitionContext.close();
 
 const deniedContext=await browser.newContext();

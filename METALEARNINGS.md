@@ -163,3 +163,11 @@ These rules apply to terminal workspaces and other single-file browser tools.
 51. Capability-driven defaults should wait for a real probe, apply only to newly
     created resources, and expose an explicit opt-out. Never rewrite restored
     user choices when the environment changes.
+
+52. Interactive PTYs echo commands before returning results. A capability probe
+    must use framing bytes that cannot appear in the echoed command and parse a
+    complete validated frame, not the first visible marker in terminal output.
+
+53. Do not collapse capability absence and probe failure into one UI state. A
+    genuine PATH miss, a read-only ttyd, and a failed WebSocket need different
+    explanations plus a retry path.

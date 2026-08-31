@@ -117,6 +117,7 @@ const usingIt: DocSection = {
     { kind: 'para', spans: [t('Open '), link(TTYD_URL), t('. The browser asks for the username and password before it opens the terminal.')] },
     { kind: 'heading', text: 'Keep a process alive with tmux' },
     { kind: 'para', spans: [t('Turn on '), em('Run in tmux'), t(' in a pane. ttydterm starts the command in a tmux session. When the browser or ttyd disconnects, the process keeps running. The pane reconnects to the same session later.')] },
+    { kind: 'para', spans: [t('ttydterm checks for tmux in the PATH used by ttyd’s login shell. If it is installed but not found, run '), em('command -v tmux'), t(' in a pane and update that shell’s login PATH.')] },
     { kind: 'para', spans: [t('The process lasts while the tmux server and session run. A host reboot or a stopped tmux session ends it.')] },
   ],
 };

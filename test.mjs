@@ -106,10 +106,10 @@ ok('social previews use the published product screenshot', await page.evaluate((
     content('meta[name="twitter:image"]')==='https://www.gulecha.org/ttydterm/docs/ttydterm.png';
 }));
 ok('hash route settled on a folder', /#\/f\//.test(page.url()), page.url());
-ok('release 1.3 is a compact superscript beside the wordmark and exposed on the shell', await page.evaluate(() =>
-  document.querySelector('.brand-version')?.textContent === '1.3' &&
-  document.querySelector('.brand-version')?.getAttribute('aria-label') === 'version 1.3' &&
-  document.querySelector('.shell')?.getAttribute('data-version') === '1.3'));
+ok('release 1.4 is a compact superscript beside the wordmark and exposed on the shell', await page.evaluate(() =>
+  document.querySelector('.brand-version')?.textContent === '1.4' &&
+  document.querySelector('.brand-version')?.getAttribute('aria-label') === 'version 1.4' &&
+  document.querySelector('.shell')?.getAttribute('data-version') === '1.4'));
 ok('fresh sidebar uses the compact 176px default', Math.abs((await page.locator('.rail').evaluate((el) => el.getBoundingClientRect().width)) - 176) < 1);
 
 const folderNames = await page.$$eval('.folder-name', (n) => n.map((e) => e.textContent));
@@ -164,7 +164,7 @@ ok('the collapse control sits to the right of the brand on the same centre line'
 ok('the release uses a light superscript pill immediately after ttydterm',await page.evaluate(()=>{
   const name=document.querySelector('.brand-name'),badge=document.querySelector('.brand-version');if(!badge||!name)return false;
   const b=badge.getBoundingClientRect(),n=name.getBoundingClientRect(),style=getComputedStyle(badge);
-  return badge.textContent==='1.3'&&b.left>=n.right&&b.top<n.top+n.height/2&&b.height<n.height&&parseFloat(style.borderRadius)>=6&&style.boxShadow!=='none';
+  return badge.textContent==='1.4'&&b.left>=n.right&&b.top<n.top+n.height/2&&b.height<n.height&&parseFloat(style.borderRadius)>=6&&style.boxShadow!=='none';
 }));
 ok('workspace icons have no decorative line markers',await page.evaluate(()=>
   [...document.querySelectorAll('.folder-badge')].every((badge)=>getComputedStyle(badge,'::after').content==='none')));
@@ -885,6 +885,9 @@ await page.keyboard.press('Escape');
 ok('Escape closes the workspace menu and returns to its trigger',
   (await page.locator('.folder.active .folder-menu').count()) === 0 && await page.evaluate(() => document.activeElement?.classList.contains('folder-act')));
 await page.keyboard.press('Space');
+await page.evaluate(({folderId,otherPaneId})=>window.__reportCommandCompletion({folderId,paneId:otherPaneId,exitStatus:0,duration:6000}),firstCompletion);
+ok('an unrelated app update does not remount rows or close an open workspace menu',
+  (await page.locator('.folder.active .folder-menu').count())===1);
 const rowOpen = await boxOf(page, '.folder.active .folder-name');
 ok('opening the overlaid workspace menu does not resize the workspace name', sameBox(rowRest, rowOpen),
   JSON.stringify(rowRest) + ' -> ' + JSON.stringify(rowOpen));
@@ -1004,10 +1007,20 @@ const unlabelled = await page.evaluate(() => {
 });
 ok('every settings control has an associated label', unlabelled.length === 0, unlabelled.join(', '));
 
-await page.fill('.panesettings input[type=text]', 'htop');
-await page.waitForTimeout(320);
-const hasHtop = await page.locator(LIVE_TERM, { hasText: 'htop' }).count();
-ok('pane command autosaves straight to the terminal', hasHtop > 0, String(hasHtop));
+const commandBefore=await page.evaluate(()=>JSON.parse(localStorage.getItem('ttyd-workspace-v2')).folders.flatMap((folder)=>{
+  const panes=[];const walk=(node)=>node.type==='pane'?panes.push(node):node.children.forEach(walk);walk(folder.layout);return panes;
+}).find((pane)=>pane.id===location.hash.split('/').at(-1))?.command);
+await page.fill('.panesettings input[type=text]','htop');
+await page.waitForTimeout(80);
+ok('typing a pane command keeps a local draft instead of restarting partial commands',await page.evaluate((before)=>{
+  const panes=[];const walk=(node)=>node.type==='pane'?panes.push(node):node.children.forEach(walk);
+  JSON.parse(localStorage.getItem('ttyd-workspace-v2')).folders.forEach((folder)=>walk(folder.layout));
+  return panes.find((pane)=>pane.id===location.hash.split('/').at(-1))?.command===before;
+},commandBefore));
+await page.locator('.panesettings input[type=text]').press('Enter');
+await page.waitForFunction(()=>[...document.querySelectorAll('.surface:not([hidden]) .term')].some((term)=>term.textContent.includes('htop')));
+const hasHtop=await page.locator(LIVE_TERM,{hasText:'htop'}).count();
+ok('Enter commits the command once and restarts the pane',hasHtop>0,String(hasHtop));
 
 const persistBefore = await page.evaluate(() => document.querySelector('.panesettings input[type=checkbox]').checked);
 await page.locator('.panesettings input[type=checkbox]').click();
@@ -1025,7 +1038,18 @@ ok('the tmux checkbox autosaves into the config', persistStored === !persistBefo
 await page.screenshot({ path: `${SHOTS}/20-pane-settings.png` });
 await page.locator('.panesettings .btn.primary').click();
 await page.waitForTimeout(200);
-ok('Done closes pane settings', (await page.locator('.panesettings').count()) === 0);
+ok('Done closes pane settings',(await page.locator('.panesettings').count())===0);
+const committedPaneId=await pane2.getAttribute('data-pane-id');
+await page.evaluate(({folderId,paneId})=>location.hash='#/f/'+encodeURIComponent(folderId)+'/pane/'+encodeURIComponent(paneId),{folderId:firstCompletion.folderId,paneId:committedPaneId});
+await page.waitForSelector('.panesettings .ps-input');
+await page.fill('.panesettings .ps-input','rm -rf /tm');
+await page.keyboard.press('Escape');
+await page.waitForFunction(()=>!document.querySelector('.panesettings'));
+ok('Escape discards an uncommitted command draft',await page.evaluate((paneId)=>{
+  const panes=[];const walk=(node)=>node.type==='pane'?panes.push(node):node.children.forEach(walk);
+  JSON.parse(localStorage.getItem('ttyd-workspace-v2')).folders.forEach((folder)=>walk(folder.layout));
+  return panes.find((pane)=>pane.id===paneId)?.command==='htop';
+},committedPaneId));
 
 console.log('\nworkspace icon');
 await page.locator('.folder.active').hover();
@@ -1267,7 +1291,8 @@ await page.evaluate(() => {
   if (stage) observer.observe(stage, { attributes:true, subtree:true, attributeFilter:['hidden'] });
 });
 await page.locator('.folder').nth(1).click();
-await page.waitForSelector('.surface:not([hidden]) .term[data-ready="1"]', { timeout: 3000 });
+await page.waitForFunction(()=>document.documentElement.dataset.switchFinished,{timeout:3000});
+await page.waitForSelector('.surface:not([hidden]) .term[data-ready="1"]',{timeout:3000});
 const switchMs = await page.evaluate(() =>
   Number(document.documentElement.dataset.switchFinished) - Number(document.documentElement.dataset.switchStarted));
 const replayed = await page.evaluate(() =>
@@ -1407,6 +1432,7 @@ ok('canonical launch command stays direct and blocks URL child arguments',
   !bannerCommand.includes('bash -c') && !bannerCommand.includes(' -a '));
 
 await demo.locator('.folder', { hasText: 'Using it' }).click();
+await demo.waitForSelector('.surface:not([hidden]) .doc-term[data-doc="using"]');
 const usingText = await demo.locator('.surface:not([hidden]) .doc-body').textContent();
 ok('Using it includes four scoped package managers, download, localhost auth and tmux limits',
   ['brew install ttyd tmux','sudo apt install ttyd tmux','sudo dnf install ttyd tmux','sudo pacman -S ttyd tmux',
@@ -1527,6 +1553,38 @@ ok('static hosting migrates rather than replacing a saved real-workspace configu
 await savedContext.close();
 await demoContext.close();
 
+const railPreferenceContext=await browser.newContext({viewport:{width:1440,height:900}});
+await railPreferenceContext.addInitScript(()=>localStorage.setItem('ttyd-workspace-v2',JSON.stringify({
+  version:7,ui:{railWidth:176,railOpen:false,fontSize:13,fontWeight:'regular',notifyOnCommandFinish:false},
+  folders:[{id:'rail-saved',name:'rail-saved',cwd:'~',theme:'paper',icon:null,pattern:'plain',layout:{type:'pane',id:'rail-pane',command:'bash',persist:false}}],
+})));
+const railPreferencePage=await railPreferenceContext.newPage();
+await railPreferencePage.goto(BASE,{waitUntil:'networkidle'});
+ok('a saved collapsed sidebar remains collapsed on a wide-screen reload',
+  (await railPreferencePage.locator('.rail.collapsed').count())===1&&
+  await railPreferencePage.evaluate(()=>JSON.parse(localStorage.getItem('ttyd-workspace-v2')).ui.railOpen===false));
+await railPreferenceContext.close();
+
+const narrowPreferenceContext=await browser.newContext({viewport:{width:600,height:720}});
+await narrowPreferenceContext.addInitScript(()=>localStorage.setItem('ttyd-workspace-v2',JSON.stringify({
+  version:7,ui:{railWidth:176,railOpen:true,fontSize:13,fontWeight:'regular',notifyOnCommandFinish:false},
+  folders:[{id:'rail-narrow',name:'rail-narrow',cwd:'~',theme:'paper',icon:null,pattern:'plain',layout:{type:'pane',id:'narrow-pane',command:'bash',persist:false}}],
+})));
+const narrowPreferencePage=await narrowPreferenceContext.newPage();
+await narrowPreferencePage.goto(BASE,{waitUntil:'networkidle'});
+ok('narrow auto-collapse does not overwrite the saved wide-screen preference',
+  (await narrowPreferencePage.locator('.rail.collapsed').count())===1&&
+  await narrowPreferencePage.evaluate(()=>JSON.parse(localStorage.getItem('ttyd-workspace-v2')).ui.railOpen===true));
+await narrowPreferencePage.locator('.rail-toggle[aria-label="Show sidebar"]').click();
+ok('the auto-collapsed sidebar can be opened temporarily on a narrow screen',
+  (await narrowPreferencePage.locator('.rail:not(.collapsed)').count())===1&&
+  await narrowPreferencePage.evaluate(()=>JSON.parse(localStorage.getItem('ttyd-workspace-v2')).ui.railOpen===true));
+await narrowPreferencePage.setViewportSize({width:1440,height:900});
+await narrowPreferencePage.waitForFunction(()=>document.querySelector('.rail:not(.collapsed)'));
+ok('leaving the narrow viewport restores the saved sidebar preference',
+  (await narrowPreferencePage.locator('.rail:not(.collapsed)').count())===1);
+await narrowPreferenceContext.close();
+
 const transitionContext = await browser.newContext();
 await transitionContext.addInitScript((config) =>
   localStorage.setItem('ttyd-workspace-v2', JSON.stringify(config)), savedConfig);
@@ -1545,6 +1603,7 @@ ok('probing to real ttyd changes renderer without violating React hook order',
 await transitionPage.evaluate(()=>Object.defineProperty(navigator,'clipboard',{configurable:true,value:{readText:async()=> 'from clipboard'}}));
 const transitionPane=transitionPage.locator('.surface:not([hidden]) .pane').first();
 await transitionPane.click({button:'right',position:{x:80,y:80}});
+await transitionPage.waitForSelector('.panepop');
 await transitionPage.keyboard.press('Escape');
 await transitionPage.waitForFunction(()=>document.activeElement?.classList.contains('xterm-helper-textarea'));
 ok('Escape from the right-click menu returns actual DOM focus to xterm input',await transitionPage.evaluate(()=>
@@ -1563,6 +1622,63 @@ ok('a probe failure is explained and retryable instead of being reported as tmux
     !!retry&&box.height>=24&&box.width>=24;
 }));
 await transitionContext.close();
+
+const realLifecycleConfig={version:7,ui:{railWidth:176,railOpen:true,fontSize:13,fontWeight:'regular',notifyOnCommandFinish:false},folders:[
+  {id:'title-one',name:'title-one',cwd:'~',theme:'night',icon:null,pattern:'plain',layout:{type:'pane',id:'p-one',command:'bash',persist:false}},
+  {id:'title-two',name:'title-two',cwd:'~',theme:'ocean',icon:null,pattern:'plain',layout:{type:'pane',id:'p-two',command:'bash',persist:false}},
+]};
+const lifecycleContext=await browser.newContext();
+await lifecycleContext.addInitScript((config)=>{
+  localStorage.setItem('ttyd-workspace-v2',JSON.stringify(config));window.__fakeSockets=[];
+  const frame=(command,text)=>{const data=new TextEncoder().encode(text),out=new Uint8Array(data.length+1);out[0]=command.charCodeAt(0);out.set(data,1);return out.buffer};
+  class FakeWebSocket{
+    constructor(){this.readyState=0;this.sent=[];window.__fakeSockets.push(this);queueMicrotask(()=>{this.readyState=1;this.onopen?.({})})}
+    send(value){const text=new TextDecoder().decode(value);this.sent.push(text);if(text.startsWith('{'))queueMicrotask(()=>this.onmessage?.({data:frame('0','shell ready\r\n')}))}
+    close(){this.readyState=3}
+  }
+  Object.defineProperty(window,'WebSocket',{value:FakeWebSocket,configurable:true});
+},realLifecycleConfig);
+const lifecyclePage=await lifecycleContext.newPage();
+await lifecyclePage.route('**/token',(route)=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({token:'test-token'})}));
+await lifecyclePage.goto(RAW_BASE,{waitUntil:'domcontentloaded'});
+await lifecyclePage.waitForFunction(()=>document.querySelectorAll('.connection-ready').length===2);
+await lifecyclePage.locator('.surface:not([hidden]) .pane').click();
+await lifecyclePage.waitForFunction(()=>window.__fakeSockets.some((socket)=>socket.sent.some((value)=>value.includes('p-one')))&&
+  window.__fakeSockets.some((socket)=>socket.sent.some((value)=>value.includes('p-two'))));
+const titleOwnership=await lifecyclePage.evaluate(()=>{
+  const frame=(text)=>{const data=new TextEncoder().encode(text),out=new Uint8Array(data.length+1);out[0]=49;out.set(data,1);return out.buffer};
+  const one=window.__fakeSockets.find((socket)=>socket.sent.some((value)=>value.includes('p-one')));
+  const two=window.__fakeSockets.find((socket)=>socket.sent.some((value)=>value.includes('p-two')));
+  one.onmessage({data:frame('foreground')});const foreground=document.title;
+  two.onmessage({data:frame('background')});return {foreground,afterBackground:document.title};
+});
+ok('a hidden workspace cannot overwrite the active focused pane title',
+  titleOwnership.foreground==='foreground · ttydterm'&&titleOwnership.afterBackground===titleOwnership.foreground,JSON.stringify(titleOwnership));
+await lifecyclePage.locator('.folder-main',{hasText:'title-two'}).click();
+await lifecyclePage.waitForFunction(()=>document.title==='background · ttydterm');
+ok('switching focus gives title ownership to the newly active pane',await lifecyclePage.title()==='background · ttydterm');
+await lifecyclePage.evaluate(()=>location.hash='#/f/title-one/pane/p-one');
+await lifecyclePage.waitForSelector('.panesettings .ps-input');
+const socketsBeforeTyping=await lifecyclePage.evaluate(()=>window.__fakeSockets.length);
+const lifecycleCommand=lifecyclePage.locator('.panesettings .ps-input');
+await lifecycleCommand.fill('');
+await lifecycleCommand.pressSequentially('printf hello',{delay:5});
+ok('typing a real pane command opens no partial-command WebSockets',
+  await lifecyclePage.evaluate(()=>window.__fakeSockets.length)===socketsBeforeTyping);
+await lifecycleCommand.press('Enter');
+await lifecyclePage.waitForFunction((count)=>window.__fakeSockets.length===count+1,socketsBeforeTyping);
+ok('committing a real pane command restarts exactly one terminal',
+  await lifecyclePage.evaluate(()=>window.__fakeSockets.length)===socketsBeforeTyping+1);
+await lifecyclePage.waitForFunction(()=>document.querySelector('.panesettings .ps-input')?.value==='printf hello');
+const socketsBeforeDiscard=await lifecyclePage.evaluate(()=>window.__fakeSockets.length);
+await lifecyclePage.fill('.panesettings .ps-input','rm -rf /tm');
+await lifecyclePage.keyboard.press('Escape');
+await lifecyclePage.waitForFunction(()=>!document.querySelector('.panesettings'));
+ok('Escape discards a real pane draft without opening a socket or changing saved configuration',await lifecyclePage.evaluate(({count})=>{
+  const pane=JSON.parse(localStorage.getItem('ttyd-workspace-v2')).folders[0].layout;
+  return window.__fakeSockets.length===count&&pane.command==='printf hello';
+},{count:socketsBeforeDiscard}));
+await lifecycleContext.close();
 
 const deniedContext=await browser.newContext();
 await deniedContext.addInitScript(()=>{

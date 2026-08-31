@@ -2,136 +2,19 @@ import React, { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef,
 import { createRoot } from 'react-dom/client';
 import { paneLaunchCommand, shellCwd, shellQuote, tmuxLaunchCommand, ttydLaunchCommand } from './commands';
 import { DOC_PAGES, docPage } from './docs';
+import { CountGlyph, Ico, WS_ICONS, WS_ICON_KEYS, WsIcon } from './icons';
+import { countPanes, equal, findPane, listPanes, mapTree, nodeMin, normalize, pane, removePane, splitPane, uid } from './layout';
 import type { DocBlock, DocPage, DocSection, DocSpan } from './docs';
 import { Button, CheckboxField, Field, FieldGroup, ModalActions, ModalForm, ModalShell } from './modal';
 import type {
   Capabilities, Config, Folder, FontWeight, LayoutNode, PaneNode, PatternName, Runtime,
   SplitAxis, Theme, TmuxState, TtydEndpoints, UiState, ValidationResult,
 } from './types';
+import { chromeVars, contrastAudit, paneGridIndex, seededPane, sidebarAtmosphereVars, softHorizonBackground, THEME_KEYS, THEMES, themeOf, themeVars } from './themes';
 import { APP_VERSION } from './version';
 
-const THEMES: Record<string, Theme> = {
-  night:  { label:'night', appearance:'dark', bg:'#11141c', fg:'#c8d1e4', dim:'#7682a1', cursor:'#7aa2f7', red:'#f7768e', green:'#9ece6a', yellow:'#e0af68', blue:'#7aa2f7', magenta:'#bb9af7', cyan:'#7dcfff', ui:{ canvas:'#272a31', sidebar:'#45474d', raised:'#2c2f36', field:'#20232a', hover:'#5d5f64', active:'#344a78', edge:'#7b7e85', text:'#f4f6fb', muted:'#d1d5df', danger:'#f7768e', warning:'#e0af68', success:'#9ece6a', focus:'#8bb3ff' } },
-  ink:    { label:'ink', appearance:'dark', bg:'#0d0d0f', fg:'#d0d0d2', dim:'#7d7d83', cursor:'#d0d0d2', red:'#e05561', green:'#8cc265', yellow:'#d4b062', blue:'#61a6f2', magenta:'#c162de', cyan:'#56b6c2', ui:{ canvas:'#252527', sidebar:'#424244', raised:'#29292b', field:'#1d1d1f', hover:'#59595b', active:'#304b70', edge:'#77777a', text:'#f5f5f6', muted:'#d0d0d4', danger:'#f7768e', warning:'#e0af68', success:'#9ece6a', focus:'#78b7ff' } },
-  ocean:  { label:'ocean', appearance:'dark', bg:'#0e1a2b', fg:'#c3d4e8', dim:'#7087a2', cursor:'#4fc3f7', red:'#ef7d84', green:'#7fd1a4', yellow:'#e5c07b', blue:'#5eb0ef', magenta:'#b48ead', cyan:'#4fc3f7', ui:{ canvas:'#253243', sidebar:'#405062', raised:'#293849', field:'#1c2a3b', hover:'#586879', active:'#285478', edge:'#75879a', text:'#edf5ff', muted:'#c5d2e2', danger:'#f7768e', warning:'#e0af68', success:'#9ece6a', focus:'#64c7ff' } },
-  forest: { label:'forest', appearance:'dark', bg:'#101a13', fg:'#c6d6c4', dim:'#718a73', cursor:'#8fd97a', red:'#e08a7a', green:'#8fd97a', yellow:'#d9c471', blue:'#79b8c4', magenta:'#b394c9', cyan:'#79c4bb', ui:{ canvas:'#263128', sidebar:'#435047', raised:'#2a372d', field:'#1e2a21', hover:'#5b685e', active:'#315d48', edge:'#78897c', text:'#eff8ee', muted:'#c9d7c9', danger:'#f7768e', warning:'#e0af68', success:'#9ece6a', focus:'#9cecff' } },
-  amber:  { label:'amber', appearance:'dark', bg:'#1a1510', fg:'#e0d3bd', dim:'#937f62', cursor:'#f0b429', red:'#e88b6a', green:'#b9c46b', yellow:'#f0b429', blue:'#94b3c9', magenta:'#c79ac0', cyan:'#8ec4bd', ui:{ canvas:'#332d25', sidebar:'#514a40', raised:'#393229', field:'#29231c', hover:'#696157', active:'#66511f', edge:'#908477', text:'#fff5e6', muted:'#ded1bc', danger:'#f7768e', warning:'#e0af68', success:'#9ece6a', focus:'#ffd166' } },
-  paper:  { label:'paper', appearance:'light', bg:'#fbfaf6', fg:'#2c3038', dim:'#6c7079', cursor:'#2c3038', red:'#b3405a', green:'#4a7a32', yellow:'#96690b', blue:'#2a5db0', magenta:'#8a4a9e', cyan:'#1c7480', ui:{ canvas:'#e1e0dc', sidebar:'#d2d1cd', raised:'#f1f0ec', field:'#f8f7f3', hover:'#c3c2be', active:'#b9c9e8', edge:'#74777d', text:'#20242b', muted:'#545963', danger:'#9f2945', warning:'#765000', success:'#356b2d', focus:'#174fa7' } },
-  daylight:{ label:'daylight', appearance:'light', bg:'#f7f8fa', fg:'#20242c', dim:'#626873', cursor:'#20242c', red:'#ad314b', green:'#3c7429', yellow:'#875e00', blue:'#245aa8', magenta:'#824292', cyan:'#166d78', ui:{ canvas:'#dde0e5', sidebar:'#cdd2d9', raised:'#eef0f3', field:'#f8f9fb', hover:'#bcc3cc', active:'#b5c8e6', edge:'#6c737d', text:'#171b22', muted:'#4d5560', danger:'#9f2945', warning:'#765000', success:'#356b2d', focus:'#174f9e' } },
-  mist:   { label:'mist', appearance:'light', bg:'#eef3f7', fg:'#202a35', dim:'#5d6875', cursor:'#202a35', red:'#a83650', green:'#356f37', yellow:'#805b00', blue:'#20599f', magenta:'#79458d', cyan:'#146b75', ui:{ canvas:'#d4dce3', sidebar:'#c3ced8', raised:'#e4ebf0', field:'#f1f5f8', hover:'#b2c0cc', active:'#aec6df', edge:'#65717d', text:'#17212b', muted:'#465462', danger:'#9f2945', warning:'#765000', success:'#356b2d', focus:'#145296' } },
-  sand:   { label:'sand', appearance:'light', bg:'#f4efe3', fg:'#302c25', dim:'#696158', cursor:'#302c25', red:'#aa394c', green:'#467126', yellow:'#805900', blue:'#315a9b', magenta:'#7d478a', cyan:'#1c6b70', ui:{ canvas:'#ddd6c8', sidebar:'#cec4b3', raised:'#ebe4d7', field:'#f6f1e8', hover:'#bfb3a1', active:'#c3c9d7', edge:'#746b60', text:'#262119', muted:'#574f45', danger:'#9f2945', warning:'#765000', success:'#356b2d', focus:'#274f91' } },
-};
-const THEME_KEYS = Object.keys(THEMES);
-
-const themeOf = (key: string | null | undefined): Theme => (key ? THEMES[key] : undefined) || THEMES.paper;
-
-const _rgb = (h: string) => { h = h.replace('#',''); return [0,2,4].map((i) => parseInt(h.slice(i,i+2),16)); };
-const _lin = (c: number) => { c /= 255; return c <= 0.03928 ? c/12.92 : Math.pow((c+0.055)/1.055, 2.4); };
-const luminance = (h: string) => { const [r,g,b] = _rgb(h).map(_lin); return 0.2126*r + 0.7152*g + 0.0722*b; };
-const contrast = (a: string, b: string) => {
-  const l1 = luminance(a), l2 = luminance(b);
-  const [hi, lo] = l1 > l2 ? [l1, l2] : [l2, l1];
-  return (hi + 0.05) / (lo + 0.05);
-};
-
-window.__contrastAudit = () => {
-  const TEXT: Array<keyof Theme & ('fg'|'dim'|'red'|'green'|'yellow'|'blue'|'magenta'|'cyan'|'cursor')> =
-    ['fg','dim','red','green','yellow','blue','magenta','cyan','cursor'];
-  const out: Array<{ theme: string; key: string; kind: string; ratio: number; min: number }> = [];
-  for (const [name, t] of Object.entries(THEMES)) {
-    TEXT.forEach((k) => out.push({ theme:name, key:k, kind:'text', ratio:+contrast(t[k], t.bg).toFixed(2), min:4.5 }));
-    out.push({ theme:name, key:'focus-ring', kind:'ui', ratio:+contrast(t.blue, t.bg).toFixed(2), min:3 });
-
-    out.push({ theme:name, key:'terminal-selection', kind:'text', ratio:+contrast(t.bg, t.blue).toFixed(2), min:4.5 });
-    out.push({ theme:name, key:'ui-text/sidebar', kind:'text', ratio:+contrast(t.ui.text, t.ui.sidebar).toFixed(2), min:4.5 });
-    out.push({ theme:name, key:'ui-muted/sidebar', kind:'text', ratio:+contrast(t.ui.muted, t.ui.sidebar).toFixed(2), min:4.5 });
-    out.push({ theme:name, key:'ui-text/raised', kind:'text', ratio:+contrast(t.ui.text, t.ui.raised).toFixed(2), min:4.5 });
-    out.push({ theme:name, key:'ui-muted/raised', kind:'text', ratio:+contrast(t.ui.muted, t.ui.raised).toFixed(2), min:4.5 });
-    out.push({ theme:name, key:'ui-focus/sidebar', kind:'ui', ratio:+contrast(t.ui.focus, t.ui.sidebar).toFixed(2), min:3 });
-    out.push({ theme:name, key:'ui-focus/raised', kind:'ui', ratio:+contrast(t.ui.focus, t.ui.raised).toFixed(2), min:3 });
-    out.push({ theme:name, key:'ui-danger/raised', kind:'text', ratio:+contrast(t.ui.danger, t.ui.raised).toFixed(2), min:4.5 });
-    out.push({ theme:name, key:'ui-warning/raised', kind:'text', ratio:+contrast(t.ui.warning, t.ui.raised).toFixed(2), min:4.5 });
-    out.push({ theme:name, key:'ui-success/raised', kind:'text', ratio:+contrast(t.ui.success, t.ui.raised).toFixed(2), min:4.5 });
-    out.push({ theme:name, key:'selected-ink/selected', kind:'text', ratio:+contrast(t.bg, t.blue).toFixed(2), min:4.5 });
-  }
-  return out;
-};
-
-const seededPane = (index: number, salt = 3) => {
-  let x = (index + 1) * 2654435761 + salt * 1013904223;
-  x ^= x >>> 16;
-  return x >>> 0;
-};
-const hsla = (h: number, s: number, l: number, a: number) => `hsla(${((h % 360) + 360) % 360} ${s}% ${l}% / ${a})`;
-const softHorizonBackground = (index: number, active = false) => {
-  const amount = 0.04 * (active ? 2 : 1);
-  const seed = seededPane(index);
-  const rotation = seed % 360;
-  return [
-    `linear-gradient(${175 + seed % 12}deg,${hsla(rotation + 215,72,52,amount * .8)} 0%,transparent 42%)`,
-    `linear-gradient(${5 + seed % 15}deg,transparent 52%,${hsla(rotation + 165,68,51,amount * .72)} 100%)`,
-    `linear-gradient(90deg,${hsla(rotation + 28,75,53,amount * .55)} 0%,transparent 35%)`,
-    `linear-gradient(270deg,${hsla(rotation + 300,70,53,amount * .45)} 0%,transparent 30%)`,
-  ].join(',');
-};
-const paneGridIndex = (layout: LayoutNode | null, paneId: string): number => {
-  let index = 0;
-  const visit = (node: LayoutNode | null): number => {
-    if (!node) return -1;
-    if (node.type === 'pane') return node.id === paneId ? index : (index++, -1);
-    for (const child of node.children) {
-      const found = visit(child);
-      if (found >= 0) return found;
-    }
-    return -1;
-  };
-  return Math.max(0, visit(layout));
-};
-
-const sidebarAtmosphereVars = () => softHorizonBackground(0, true);
-
+window.__contrastAudit = contrastAudit;
 window.__terminalAtmosphere = { seededPane, softHorizonBackground, paneGridIndex, sidebarAtmosphereVars };
-
-const themeVars = (t: Theme): React.CSSProperties => ({
-  '--t-bg': t.bg, '--t-fg': t.fg, '--t-dim': t.dim, '--t-cursor': t.cursor,
-  '--t-red': t.red, '--t-green': t.green, '--t-yellow': t.yellow,
-  '--t-blue': t.blue, '--t-magenta': t.magenta, '--t-cyan': t.cyan,
-  '--t-edge': 'color-mix(in srgb, ' + t.fg + ' 26%, ' + t.bg + ')',
-
-  '--t-ring': t.blue,
-  '--t-skel': 'color-mix(in srgb, ' + t.fg + ' 12%, ' + t.bg + ')',
-
-  '--t-pattern': 'color-mix(in srgb, ' + t.fg + ' 5%, ' + t.bg + ')',
-});
-
-const chromeVars = (t: Theme): React.CSSProperties => ({
-  ...themeVars(t),
-  '--stage-bg': t.ui.canvas,
-  '--stage-panel': t.ui.raised,
-  '--stage-edge': t.ui.edge,
-  '--stage-ink': t.ui.text,
-  '--stage-accent': t.ui.focus,
-
-  '--ui-panel': t.bg,
-  '--ui-panel-atmosphere': sidebarAtmosphereVars(),
-  '--ui-raised': t.ui.raised,
-  '--ui-field': t.ui.field,
-  '--ui-hover': 'color-mix(in srgb, ' + t.fg + ' 14%, ' + t.bg + ')',
-  '--ui-active': t.blue,
-  '--ui-active-ink': t.bg,
-  '--ui-edge': t.ui.edge,
-  '--ui-ink': t.fg,
-  '--ui-muted': t.dim,
-  '--ui-accent': t.ui.focus,
-  '--ui-danger': t.ui.danger,
-  '--ui-warn': t.ui.warning,
-  '--ui-success': t.ui.success,
-  '--ui-selected-ink': t.bg,
-  '--ui-shadow': 'color-mix(in srgb, ' + t.bg + ' 62%, transparent)',
-  '--ui-scrim': 'color-mix(in srgb, ' + t.bg + ' 62%, transparent)',
-  '--panel': t.ui.raised, '--ink': t.ui.text, '--muted': t.ui.muted,
-  '--line': t.ui.edge, '--accent': t.ui.focus, '--danger': t.ui.danger,
-});
 
 const STORE_KEY = 'ttyd-workspace-v2';
 const BG_KEY = 'ttyd-workspace-bg';
@@ -140,9 +23,6 @@ const FONT_SIZES = [11, 12, 13, 14, 16, 18];
 const FONT_WEIGHTS: Array<{key:FontWeight;label:string;value:number}> = [{key:'regular',label:'Regular',value:400},{key:'semibold',label:'Semi bold',value:600},{key:'bold',label:'Bold',value:700}];
 const PATTERNS: PatternName[] = ['plain','dots','grid','diagonal','cross','waves','bricks'];
 const defaultPattern = (id: string): PatternName => PATTERNS[1 + (hash32(id) % (PATTERNS.length - 1))];
-const MIN_W = 260;   // a pane never renders narrower than this…
-const MIN_H = 140;   // …or shorter than this; the area scrolls instead.
-
 const GAP = (() => {
   const v = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--gap'));
   return Number.isFinite(v) && v > 0 ? v : 8;
@@ -154,9 +34,6 @@ const RAIL_MIN = 148, RAIL_MAX = 420, RAIL_DEFAULT = 176;
 const RAIL_COLLAPSED = 52;
 const COMPLETION_ATTENTION_MS = 5000;
 
-const uid = (p: string) => p + Math.random().toString(36).slice(2, 9);
-const pane = (command: string, persist = false): PaneNode => ({ type:'pane', id: uid('p-'), command, persist });
-const equal = (n: number) => Array.from({ length: n }, () => 1 / n);
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
 
 function defaultConfig(): Config {
@@ -306,74 +183,6 @@ async function probeCapabilities(runtime: Runtime, timeout=8000): Promise<Capabi
   });
 }
 
-const normalize = (sizes: number[]): number[] => {
-  const clean = sizes.map((s) => (Number.isFinite(s) && s > 0 ? s : 0.0001));
-  const sum = clean.reduce((a, b) => a + b, 0);
-  return clean.map((s) => s / sum);
-};
-
-function nodeMin(node: LayoutNode | null): { w: number; h: number } {
-  if (!node) return { w: MIN_W, h: MIN_H };
-  if (node.type === 'pane') return { w: MIN_W, h: MIN_H };
-  const kids = node.children.map(nodeMin);
-  const gaps = (node.children.length - 1) * GAP;
-  if (node.axis === 'columns') {
-    return {
-      w: Math.max(...kids.map((k, i) => k.w / Math.max(node.sizes[i], 1e-4))) + gaps,
-      h: Math.max(...kids.map((k) => k.h)),
-    };
-  }
-  return {
-    w: Math.max(...kids.map((k) => k.w)),
-    h: Math.max(...kids.map((k, i) => k.h / Math.max(node.sizes[i], 1e-4))) + gaps,
-  };
-}
-
-const mapTree = (node: LayoutNode | null, fn: (node: LayoutNode) => LayoutNode): LayoutNode | null => {
-  if (!node) return null;
-  const out = fn(node);
-  if (out !== node) return out;
-  if (node.type === 'split') {
-    const children = node.children.map((c) => mapTree(c, fn)).filter((c): c is LayoutNode => !!c);
-    return children.some((c, i) => c !== node.children[i]) ? { ...node, children } : node;
-  }
-  return node;
-};
-
-const splitPane = (root: LayoutNode | null, paneId: string, axis: SplitAxis, count: number, persist = false) =>
-  mapTree(root, (n) => {
-    if (n.type !== 'pane' || n.id !== paneId) return n;
-    const extra = Array.from({ length: count - 1 }, () => pane('bash', persist));
-    return { type:'split', axis, sizes: equal(count), children: [n, ...extra] };
-  });
-
-function removePane(node: LayoutNode | null, paneId: string): LayoutNode | null {
-  if (!node) return null;
-  if (node.type === 'pane') return node.id === paneId ? null : node;
-  const kept: LayoutNode[] = [];
-  const sizes: number[] = [];
-  node.children.forEach((c, i) => {
-    const next = removePane(c, paneId);
-    if (next) { kept.push(next); sizes.push(node.sizes[i]); }
-  });
-  if (!kept.length) return null;
-  if (kept.length === 1) return kept[0];
-  return { ...node, children: kept, sizes: normalize(sizes) };
-}
-
-const eachPane = (node: LayoutNode | null, fn: (pane: PaneNode) => void): void => {
-  if (!node) return;
-  if (node.type === 'pane') fn(node);
-  else node.children.forEach((c) => eachPane(c, fn));
-};
-const findPane = (node: LayoutNode | null, id: string | undefined): PaneNode | null => {
-  let hit: PaneNode | null = null;
-  eachPane(node, (p) => { if (p.id === id) hit = p; });
-  return hit;
-};
-const countPanes = (node: LayoutNode | null) => { let n = 0; eachPane(node, () => n++); return n; };
-const listPanes = (node: LayoutNode | null): PaneNode[] => { const out: PaneNode[] = []; eachPane(node, (p) => out.push(p)); return out; };
-
 const hash32 = (s: string) => { let h = 2166136261 >>> 0; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; };
 const rng = (seed: number) => { let s = seed >>> 0; return () => { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; return s / 4294967296; }; };
 
@@ -509,6 +318,7 @@ window.__xtermAppearance=xtermAppearance;
 interface TerminalClient { term: XtermTerminal; fit: XtermFitAddon; socket: WebSocket }
 type ConnectionState = 'connecting' | 'starting' | 'ready' | 'disconnected' | 'error';
 interface CommandCompletion { folderId:string; paneId:string; exitStatus:number; duration:number }
+const TerminalAppearanceContext=React.createContext('');
 
 const parseCompletionStatus = (data: string): number | null => {
   const match = /^D;(\d{1,3});ttydterm$/.exec(data);
@@ -524,21 +334,28 @@ const pasteIntoTerminal = (term:XtermTerminal, text:string) => {
 };
 window.__pasteIntoTerminal=pasteIntoTerminal;
 
-function RealTerminal({ folder, pane, runtime, suspended, onCommandComplete }: {
+function RealTerminal({ folder, pane, runtime, active, suspended, titleOwner, onCommandComplete }: {
   folder: Folder;
   pane: PaneNode;
   runtime: Runtime;
+  active: boolean;
   suspended: boolean;
+  titleOwner: boolean;
   onCommandComplete: (event:CommandCompletion) => void;
 }) {
   const host = useRef<HTMLDivElement | null>(null), client = useRef<TerminalClient | null>(null);
   const [state,setState]=useState<ConnectionState>('connecting');
   const [toast,setToast]=useState<string|null>(null);
+  const appearanceContext=React.useContext(TerminalAppearanceContext);
+  const appearanceVersion=folder.theme+'\0'+appearanceContext;
+  const appliedAppearance=useRef(''),titleOwnerRef=useRef(titleOwner),paneTitle=useRef(''),appliedTitle=useRef('');
+  titleOwnerRef.current=titleOwner;
   useLayoutEffect(() => {
     const hostEl = host.current;
     if (!hostEl || runtime.mode !== 'ttyd') return;
     const appearance=xtermAppearance(hostEl);
     const term = new globalThis.Terminal({cursorBlink:false,allowTransparency:true,scrollback:pane.persist?0:1000,fontSize:appearance.fontSize,fontWeight:appearance.fontWeight,fontFamily:'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace',convertEol:true,theme:appearance.theme});
+    appliedAppearance.current=appearanceVersion;
     const fit = new globalThis.FitAddon.FitAddon(); term.loadAddon(fit);
     if(globalThis.WebLinksAddon) term.loadAddon(new globalThis.WebLinksAddon.WebLinksAddon());
     let commandStartedAt:number|null=null;
@@ -554,7 +371,7 @@ function RealTerminal({ folder, pane, runtime, suspended, onCommandComplete }: {
     const socket=new WebSocket(runtime.endpoints.ws,['tty']);socket.binaryType='arraybuffer';let initialized=false;
     const sendInput=(data: string)=>{if(socket.readyState!==1)return;const bytes=encoder.encode(data),payload=new Uint8Array(bytes.length+1);payload[0]=48;payload.set(bytes,1);socket.send(payload)};
     socket.onopen=()=>{socket.send(encoder.encode(JSON.stringify({AuthToken:runtime.token,columns:term.cols,rows:term.rows})));setState('starting')};
-    socket.onmessage=(event: MessageEvent<ArrayBuffer>)=>{const bytes=new Uint8Array(event.data),command=String.fromCharCode(bytes[0]),data=bytes.slice(1);if(command==='0'){term.write(data);if(!initialized){initialized=true;const launch=paneLaunchCommand({cwd:folder.cwd,command:pane.command,persist:pane.persist,folderLabel:folderLabel(folder),paneId:pane.id,shellIntegration:true});sendInput(`${launch}\r`);setState('ready')}}else if(command==='1')document.title=decoder.decode(data)+' · ttydterm'};
+    socket.onmessage=(event: MessageEvent<ArrayBuffer>)=>{const bytes=new Uint8Array(event.data),command=String.fromCharCode(bytes[0]),data=bytes.slice(1);if(command==='0'){term.write(data);if(!initialized){initialized=true;const launch=paneLaunchCommand({cwd:folder.cwd,command:pane.command,persist:pane.persist,folderLabel:folderLabel(folder),paneId:pane.id,shellIntegration:true});sendInput(`${launch}\r`);setState('ready')}}else if(command==='1'){paneTitle.current=decoder.decode(data)+' · ttydterm';if(titleOwnerRef.current){document.title=paneTitle.current;appliedTitle.current=paneTitle.current}}};
     socket.onclose=()=>setState('disconnected');socket.onerror=()=>setState('error');
     const input=term.onData(sendInput),resize=term.onResize(({cols,rows})=>socket.readyState===1&&socket.send(encoder.encode('1'+JSON.stringify({columns:cols,rows}))));
     let toastTimer:ReturnType<typeof setTimeout>;
@@ -572,14 +389,20 @@ function RealTerminal({ folder, pane, runtime, suspended, onCommandComplete }: {
   },[folder.cwd,folder.id,pane.id,pane.command,pane.persist,runtime.mode,runtime.mode==='ttyd'?runtime.token:null,onCommandComplete]);
 
   useLayoutEffect(()=>{
-    if(!host.current||!client.current)return;
+    if(!host.current||!client.current||appliedAppearance.current===appearanceVersion)return;
     const appearance=xtermAppearance(host.current);
     client.current.term.options.theme=appearance.theme;
     client.current.term.options.fontSize=appearance.fontSize;
     client.current.term.options.fontWeight=appearance.fontWeight;
-    try{client.current.fit.fit()}catch{}
-  });
-  useEffect(()=>{if(!suspended)try{client.current?.fit.fit()}catch{}},[suspended]);
+    appliedAppearance.current=appearanceVersion;
+    if(active)try{client.current.fit.fit()}catch{}
+  },[appearanceVersion]);
+  useEffect(()=>{
+    if(titleOwner){const next=paneTitle.current||'ttydterm';document.title=next;appliedTitle.current=next}
+    else if(appliedTitle.current){if(document.title===appliedTitle.current)document.title='ttydterm';appliedTitle.current=''}
+    return()=>{if(appliedTitle.current&&document.title===appliedTitle.current)document.title='ttydterm';appliedTitle.current=''};
+  },[titleOwner]);
+  useEffect(()=>{if(active&&!suspended)try{client.current?.fit.fit()}catch{}},[active,suspended]);
   return <div className={'term xterm-term pattern-'+(folder.pattern||'plain')+(pane.persist?' tmux-terminal':'')+' connection-'+state+(suspended?' xterm-suspended':'')} aria-label={'Terminal '+state}><div className="xterm-host" ref={host}/>{state==='ready'?null:<div className="connection-state">{state}</div>}{toast?<div className="copy-toast" role="status">{toast}</div>:null}</div>;
 }
 
@@ -723,103 +546,21 @@ function MockTerminal({ folder, pane, suspended }: {
   );
 }
 
-function Terminal({ folder, pane, runtime, suspended, onCommandComplete }: {
+function Terminal({ folder, pane, runtime, active, suspended, titleOwner, onCommandComplete }: {
   folder: Folder;
   pane: PaneNode;
   runtime: Runtime;
+  active: boolean;
   suspended: boolean;
+  titleOwner: boolean;
   onCommandComplete: (event:CommandCompletion) => void;
 }) {
   const page = folder.doc ? docPage(folder.doc) : null;
   const section = page ? page.sections[pane.docSection ?? 0] : null;
 
   if (page && section) return <DocTerminal folder={folder} page={page} section={section} />;
-  if (!folder.doc && runtime.mode === 'ttyd') return <RealTerminal folder={folder} pane={pane} runtime={runtime} suspended={suspended} onCommandComplete={onCommandComplete}/>;
+  if (!folder.doc && runtime.mode === 'ttyd') return <RealTerminal folder={folder} pane={pane} runtime={runtime} active={active} suspended={suspended} titleOwner={titleOwner} onCommandComplete={onCommandComplete}/>;
   return <MockTerminal folder={folder} pane={pane} suspended={suspended}/>;
-}
-
-const S = { fill:'none', stroke:'currentColor', strokeWidth:1.7, strokeLinecap:'round', strokeLinejoin:'round' };
-const svg = (name: string, body: React.ReactNode) => () => <svg viewBox="0 0 24 24" data-icon={name} {...S}>{body}</svg>;
-
-const Ico = {
-  plus:  svg('plus', <path d="M12 5v14M5 12h14" />),
-
-
-  gear: () => (
-    <svg viewBox="0 0 24 24" data-icon="gear" fill="currentColor" fillRule="evenodd" clipRule="evenodd" stroke="none">
-      <path d="M10.28 2.56A9.6 9.6 0 0 1 13.72 2.56L13.54 4.86A7.3 7.3 0 0 1 15.96 5.87L17.46 4.10A9.6 9.6 0 0 1 19.90 6.54L18.13 8.04A7.3 7.3 0 0 1 19.14 10.46L21.44 10.28A9.6 9.6 0 0 1 21.44 13.72L19.14 13.54A7.3 7.3 0 0 1 18.13 15.96L19.90 17.46A9.6 9.6 0 0 1 17.46 19.90L15.96 18.13A7.3 7.3 0 0 1 13.54 19.14L13.72 21.44A9.6 9.6 0 0 1 10.28 21.44L10.46 19.14A7.3 7.3 0 0 1 8.04 18.13L6.54 19.90A9.6 9.6 0 0 1 4.10 17.46L5.87 15.96A7.3 7.3 0 0 1 4.86 13.54L2.56 13.72A9.6 9.6 0 0 1 2.56 10.28L4.86 10.46A7.3 7.3 0 0 1 5.87 8.04L4.10 6.54A9.6 9.6 0 0 1 6.54 4.10L8.04 5.87A7.3 7.3 0 0 1 10.46 4.86ZM12 8.5A3.5 3.5 0 1 0 12 15.5A3.5 3.5 0 1 0 12 8.5Z" />
-    </svg>
-  ),
-  close: svg('close', <path d="M6 6l12 12M18 6L6 18" />),
-  menu:  svg('menu', <><circle cx="12" cy="5.6" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="12" cy="18.4" r="1.5" /></>),
-  export: svg('export', <><path d="M12 3.5v11M7.8 7.8 12 3.5l4.2 4.3" /><path d="M5 12.5v6.2a1.8 1.8 0 0 0 1.8 1.8h10.4a1.8 1.8 0 0 0 1.8-1.8v-6.2" /></>),
-  panel: svg('panel', <><rect x="3.5" y="4.5" width="17" height="15" rx="2" /><path d="M9.5 4.5v15" /></>),
-  search: svg('search', <><circle cx="11" cy="11" r="6.2" /><path d="m20 20-4.6-4.6" /></>),
-  keyboard: svg('keyboard', <><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M6 9h.01M9 9h.01M12 9h.01M15 9h.01M18 9h.01M7 12h.01M10 12h.01M13 12h.01M16 12h.01M7 15h10"/></>),
-  paste:svg('paste',<><path d="M9 5h6v3H9z"/><path d="M8 6H6v14h12V6h-2M9 12h6M9 16h5"/></>),
-};
-
-const WS_ICONS: Record<string, React.ReactElement> = {
-  terminal: <><rect x="3.5" y="5" width="17" height="14" rx="2" /><path d="m7 10 2.6 2.2L7 14.4M12.8 15h4" /></>,
-  code:     <path d="m9 8-4 4 4 4M15 8l4 4-4 4M13.4 5.5l-2.8 13" />,
-  folder:   <path d="M4 7.5A1.5 1.5 0 0 1 5.5 6h3.2l1.6 2h8.2A1.5 1.5 0 0 1 20 9.5v8A1.5 1.5 0 0 1 18.5 19h-13A1.5 1.5 0 0 1 4 17.5z" />,
-  server:   <><rect x="3.5" y="4.5" width="17" height="6" rx="1.6" /><rect x="3.5" y="13.5" width="17" height="6" rx="1.6" /><path d="M7 7.5h.01M7 16.5h.01" /></>,
-  database: <><ellipse cx="12" cy="6.5" rx="7" ry="2.8" /><path d="M5 6.5v11c0 1.55 3.13 2.8 7 2.8s7-1.25 7-2.8v-11M5 12c0 1.55 3.13 2.8 7 2.8s7-1.25 7-2.8" /></>,
-  cloud:    <path d="M7.2 18.5h9.3a3.6 3.6 0 0 0 .4-7.18A5.1 5.1 0 0 0 7.4 10.2a4.1 4.1 0 0 0-.2 8.3z" />,
-  globe:    <><circle cx="12" cy="12" r="8.2" /><path d="M3.8 12h16.4M12 3.8c2.1 2.3 3.2 5.2 3.2 8.2s-1.1 5.9-3.2 8.2c-2.1-2.3-3.2-5.2-3.2-8.2s1.1-5.9 3.2-8.2z" /></>,
-  rocket:   <><path d="M12 3.2c2.9 2.2 4.4 5.2 4.4 8.4L12 15.6l-4.4-4c0-3.2 1.5-6.2 4.4-8.4z" /><path d="M7.6 12.6 5 14.4l1 3.2 2.6-1M16.4 12.6 19 14.4l-1 3.2-2.6-1" /><circle cx="12" cy="9.4" r="1.5" /></>,
-  keyboard: <><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M6 9h.01M9 9h.01M12 9h.01M15 9h.01M18 9h.01M7 12h.01M10 12h.01M13 12h.01M16 12h.01M7 15h10"/></>,
-  bug:      <><path d="M8.5 9.5a3.5 3.5 0 0 1 7 0v4a3.5 3.5 0 0 1-7 0z" /><path d="M9.4 7.2 8 5.4M14.6 7.2 16 5.4M8.5 11H5M19 11h-3.5M8.5 14.5 5.6 16.4M15.5 14.5l2.9 1.9" /></>,
-  flask:    <><path d="M9.6 3.5v5.2L5.3 17a2 2 0 0 0 1.8 3h9.8a2 2 0 0 0 1.8-3l-4.3-8.3V3.5" /><path d="M8.6 3.5h6.8M7.4 14.5h9.2" /></>,
-  box:      <><path d="M12 3.6 20 8v8l-8 4.4L4 16V8z" /><path d="M4 8l8 4.4L20 8M12 12.4V20.4" /></>,
-  layers:   <><path d="m12 3.5 8 4.2-8 4.2-8-4.2z" /><path d="m4 12.2 8 4.2 8-4.2M4 16.4l8 4.2 8-4.2" /></>,
-  branch:   <><circle cx="7" cy="6" r="2.2" /><circle cx="7" cy="18" r="2.2" /><circle cx="17" cy="9" r="2.2" /><path d="M7 8.2v7.6M17 11.2c0 3-3.4 3.4-6.2 4.2" /></>,
-  cpu:      <><rect x="7" y="7" width="10" height="10" rx="1.6" /><path d="M10 3.6v3.4M14 3.6v3.4M10 17v3.4M14 17v3.4M3.6 10H7M3.6 14H7M17 10h3.4M17 14h3.4" /></>,
-  pulse:    <path d="M3 12h4l3-7 4 14 3-7h4" />,
-  shield:   <path d="M12 3.4 19 6v6c0 4-3 7.2-7 8.6-4-1.4-7-4.6-7-8.6V6z" />,
-  key:      <><circle cx="8" cy="12" r="3.4" /><path d="M11.4 12H21M18 12v3M15 12v2.4" /></>,
-  lock:     <><rect x="5" y="10.5" width="14" height="9.5" rx="2" /><path d="M8.4 10.5V8a3.6 3.6 0 0 1 7.2 0v2.5" /></>,
-  bell:     <><path d="M17.6 16.5H6.4c1.1-1.2 1.6-2.4 1.6-4v-2a4 4 0 0 1 8 0v2c0 1.6.5 2.8 1.6 4z" /><path d="M10.4 19.4a1.9 1.9 0 0 0 3.2 0" /></>,
-  book:     <><path d="M5 5.4A1.4 1.4 0 0 1 6.4 4H19v13.6H6.4A1.4 1.4 0 0 0 5 19z" /><path d="M5 19a1.4 1.4 0 0 0 1.4 1.4H19v-2.8" /></>,
-  file:     <><path d="M7 3.6h6.4L18 8.2v12.2H7z" /><path d="M13.2 3.6v4.8H18M9.6 13h6M9.6 16.4h6" /></>,
-  pen:      <><path d="m4 20.2 1.1-4.3L15.8 5.2a2 2 0 0 1 2.9 2.9L8 18.9z" /><path d="m14.4 6.6 3 3" /></>,
-  palette:  <><path d="M12 3.6a8.4 8.4 0 0 0 0 16.8c1.2 0 1.9-.8 1.9-1.7 0-.5-.2-.9-.5-1.2a1.7 1.7 0 0 1 1.2-2.9h1.6a4.2 4.2 0 0 0 4.2-4.2c0-4-3.8-6.8-8.4-6.8z" /><circle cx="8.2" cy="10.4" r="1.1" /><circle cx="12" cy="7.8" r="1.1" /><circle cx="15.8" cy="10" r="1.1" /></>,
-  camera:   <><path d="M4 8.6h3.4L9 6.2h6l1.6 2.4H20v10.2H4z" /><circle cx="12" cy="13.4" r="3.2" /></>,
-  music:    <><path d="M9 18V6.2l10-2V16" /><circle cx="7" cy="18" r="2.2" /><circle cx="17" cy="16" r="2.2" /></>,
-  video:    <><rect x="3.5" y="6" width="12" height="12" rx="2" /><path d="m15.5 11 5-3v8l-5-3z" /></>,
-  mail:     <><rect x="3.5" y="5.5" width="17" height="13" rx="2" /><path d="m4 8 8 5.4L20 8" /></>,
-  chat:     <path d="M4.5 6.6A1.6 1.6 0 0 1 6.1 5h11.8a1.6 1.6 0 0 1 1.6 1.6v7.8a1.6 1.6 0 0 1-1.6 1.6H9.2L4.5 19.6z" />,
-  calendar: <><rect x="4" y="5.5" width="16" height="14.5" rx="2" /><path d="M8 3.5v4M16 3.5v4M4 10h16" /></>,
-  clock:    <><circle cx="12" cy="12" r="8.2" /><path d="M12 7.4V12l3 2" /></>,
-  star:     <path d="m12 3.8 2.6 5.4 5.9.8-4.3 4.1 1 5.9-5.2-2.8-5.2 2.8 1-5.9L3.5 10l5.9-.8z" />,
-  heart:    <path d="M12 20.2S3.8 15.4 3.8 9.7A4.2 4.2 0 0 1 12 7.6a4.2 4.2 0 0 1 8.2 2.1c0 5.7-8.2 10.5-8.2 10.5z" />,
-  flag:     <><path d="M6 20.4V4.6h11.4l-2 3.6 2 3.6H6" /><path d="M6 4.6v15.8" /></>,
-  bolt:     <path d="M13.2 3 5.6 13.6H12l-1.2 7.4 7.6-10.6H12z" />,
-  flame:    <path d="M12 3.4c3.4 3.2 5.4 6 5.4 9a5.4 5.4 0 0 1-10.8 0c0-1.6.8-3 2.2-4 .2 1.4.9 2.2 1.8 2.4-.4-2.6.1-5 1.4-7.4z" />,
-  leaf:     <><path d="M20.2 3.8C10 3.8 4 8.9 4 15.4c0 2.6 1.6 4.8 4.2 4.8 6.6 0 12-6.2 12-16.4z" /><path d="M4.6 20 14 10.4" /></>,
-  moon:     <path d="M20 14.6A8.6 8.6 0 1 1 10.4 4 6.9 6.9 0 0 0 20 14.6z" />,
-  compass:  <><circle cx="12" cy="12" r="8.2" /><path d="m15.2 8.8-1.9 4.5-4.5 1.9 1.9-4.5z" /></>,
-  pin:      <><path d="M12 20.8s6.4-6.1 6.4-10.4a6.4 6.4 0 1 0-12.8 0C5.6 14.7 12 20.8 12 20.8z" /><circle cx="12" cy="10.2" r="2.4" /></>,
-  home:     <><path d="m4 11 8-6.6 8 6.6v8.4a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z" /><path d="M9.6 20.4v-6h4.8v6" /></>,
-  wrench:   <path d="M20.2 6.4 17 9.6l-2.6-2.6 3.2-3.2a5.4 5.4 0 0 0-7 6.8L4.4 17.8a2 2 0 0 0 2.8 2.8l7.2-6.2a5.4 5.4 0 0 0 5.8-8z" />,
-  gauge:    <><path d="M4.4 16.6a8.6 8.6 0 1 1 15.2 0" /><path d="m12 12.6 4-3.4" /><circle cx="12" cy="13.4" r="1.3" /></>,
-  chart:    <><path d="M4 20h16" /><path d="M7 20v-6M12 20V6.5M17 20v-9" /></>,
-  users:    <><circle cx="9" cy="8.4" r="3.1" /><path d="M3.6 19.4a5.4 5.4 0 0 1 10.8 0" /><path d="M16 5.6a3.1 3.1 0 0 1 0 5.9M17 14.6a5.4 5.4 0 0 1 3.4 4.8" /></>,
-};
-const WS_ICON_KEYS = Object.keys(WS_ICONS);
-const WsIcon = ({ name }: { name: string }) => (
-  <svg viewBox="0 0 24 24" data-icon={name} {...S}>{WS_ICONS[name]}</svg>
-);
-
-function CountGlyph({ axis, n }: { axis: SplitAxis; n: number }) {
-  const lines: React.ReactElement[] = [];
-  for (let i = 1; i < n; i++) {
-    const p = 3.5 + (17 * i) / n;
-    lines.push(axis === 'columns'
-      ? <path key={i} d={'M' + p + ' 4.5v15'} />
-      : <path key={i} d={'M3.5 ' + (4.5 + (15 * i) / n) + 'h17'} />);
-  }
-  return <svg viewBox="0 0 24 24" data-icon={'split-' + axis + '-' + n} {...S}><rect x="3.5" y="4.5" width="17" height="15" rx="2" />{lines}</svg>;
 }
 
 const parseHash = () => location.hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent);
@@ -847,21 +588,22 @@ const tmuxState = (capabilities:Capabilities, runtime:Runtime):TmuxState => capa
 type PaneMenu = { source: 'trigger' | 'context'; x: number; y: number };
 interface FocusRequest { id: string; n?: number; nonce?: number }
 
-function Pane({ node, folder, runtime, focused, completed, closing, focusReq, resizing,
+const Pane=React.memo(function Pane({ node, folder, runtime, active, focused, completed, closing, focusReq, resizing,
                onFocus, onSplit, onClose, canClose, onOpenSettings, onCommandComplete }: {
   node: PaneNode;
   folder: Folder;
   runtime: Runtime;
+  active: boolean;
   focused: boolean;
   completed: number;
   closing: boolean;
   focusReq: FocusRequest | null;
   resizing: boolean;
-  onFocus: () => void;
-  onSplit: (paneId: string, axis: SplitAxis, count: number) => void;
+  onFocus: (folderId:string,paneId:string) => void;
+  onSplit: (folderId:string,paneId:string,axis:SplitAxis,count:number) => void;
   onClose: (paneId: string) => void;
   canClose: boolean;
-  onOpenSettings: (paneId: string) => void;
+  onOpenSettings: (folderId:string,paneId:string) => void;
   onCommandComplete: (event:CommandCompletion) => void;
 }) {
   const [menu, setMenu] = useState<PaneMenu | null>(null);
@@ -891,7 +633,8 @@ function Pane({ node, folder, runtime, focused, completed, closing, focusReq, re
     if(host)host.dispatchEvent(new Event('ttydterm-focus'));
     else ref.current?.focus({preventScroll:true});
   };
-  const split = (axis: SplitAxis, n: number) => { setMenu(null); onSplit(node.id, axis, n); };
+  const focusPane=()=>onFocus(folder.id,node.id);
+  const split=(axis:SplitAxis,count:number)=>{setMenu(null);onSplit(folder.id,node.id,axis,count)};
 
   return (
     <div
@@ -901,17 +644,17 @@ function Pane({ node, folder, runtime, focused, completed, closing, focusReq, re
       data-pane-id={node.id}
       aria-label={'Terminal' + (completed ? ', ' + completed + ' completed command' + (completed === 1 ? '' : 's') + ' needing attention' : '')}
       tabIndex={-1}
-      onPointerDownCapture={onFocus}
-      onFocus={onFocus}
+      onPointerDownCapture={focusPane}
+      onFocus={focusPane}
 
       onContextMenu={(e) => {
-        e.preventDefault(); onFocus();
+        e.preventDefault(); focusPane();
         const r = ref.current?.getBoundingClientRect();
         if (!r) return;
         setMenu({ source:'context', x:e.clientX-r.left, y:e.clientY-r.top });
       }}
     >
-      <Terminal folder={folder} pane={node} runtime={runtime} suspended={resizing} onCommandComplete={onCommandComplete} />
+      <Terminal folder={folder} pane={node} runtime={runtime} active={active} suspended={resizing} titleOwner={active&&focused} onCommandComplete={onCommandComplete} />
       {completed ? <span className="pane-complete" aria-hidden="true" /> : null}
 
       {}
@@ -939,7 +682,7 @@ function Pane({ node, folder, runtime, focused, completed, closing, focusReq, re
              }}
              ref={(el: HTMLDivElement | null) => { if(el && menu.source === "context") requestAnimationFrame(()=>el.querySelector("button")?.focus()); }}>
           <button className="pico" role="menuitem" title="Pane settings" aria-label="Pane settings"
-                  onClick={() => { setMenu(null); onOpenSettings(node.id); }}><Ico.gear /></button>
+                  onClick={() => { setMenu(null); onOpenSettings(folder.id,node.id); }}><Ico.gear /></button>
           <button className="pico" role="menuitem" title="Paste" aria-label="Paste"
                   onClick={()=>{setMenu(null);ref.current?.querySelector('.xterm-host')?.dispatchEvent(new Event('ttydterm-paste'))}}><Ico.paste /></button>
           <button className="pico danger row-end" role="menuitem" disabled={!canClose}
@@ -959,12 +702,13 @@ function Pane({ node, folder, runtime, focused, completed, closing, focusReq, re
       ) : null}
     </div>
   );
-}
+});
 
 interface NodeProps {
   node: LayoutNode;
   folder: Folder;
   runtime: Runtime;
+  active: boolean;
   focusId: string | null;
   closingId: string | null;
   focusReq: FocusRequest | null;
@@ -972,31 +716,31 @@ interface NodeProps {
   resizing: boolean;
   onResizeStart: () => void;
   onResizeEnd: () => void;
-  onFocus: (paneId: string) => void;
-  onSplit: (paneId: string, axis: SplitAxis, count: number) => void;
+  onFocus: (folderId:string,paneId:string) => void;
+  onSplit: (folderId:string,paneId:string,axis:SplitAxis,count:number) => void;
   onClose: (paneId: string) => void;
   canClose: boolean;
-  onResize: (path: number[], sizes: number[]) => void;
-  onOpenSettings: (paneId: string) => void;
+  onResize: (folderId:string,path:number[],sizes:number[]) => void;
+  onOpenSettings: (folderId:string,paneId:string) => void;
   onCommandComplete: (event:CommandCompletion) => void;
   path: number[];
 }
 
-function Node({ node, folder, runtime, focusId, closingId, focusReq, completedByPane, resizing, onResizeStart, onResizeEnd,
+function Node({ node, folder, runtime, active, focusId, closingId, focusReq, completedByPane, resizing, onResizeStart, onResizeEnd,
                onFocus, onSplit, onClose, canClose, onResize, onOpenSettings, onCommandComplete, path }: NodeProps) {
   const ref = useRef<HTMLDivElement | null>(null);
 
   if (node.type === 'pane') {
     const leaf = node;
     return (
-      <Pane node={leaf} folder={folder} runtime={runtime} focused={focusId === leaf.id} completed={completedByPane[leaf.id] || 0} closing={closingId === leaf.id}
-            focusReq={focusReq} resizing={resizing}
-            onFocus={() => onFocus(leaf.id)} onSplit={onSplit} onClose={onClose} canClose={canClose}
+      <Pane node={leaf} folder={folder} runtime={runtime} active={active} focused={focusId === leaf.id} completed={completedByPane[leaf.id] || 0} closing={closingId === leaf.id}
+            focusReq={focusReq?.id===leaf.id?focusReq:null} resizing={resizing}
+            onFocus={onFocus} onSplit={onSplit} onClose={onClose} canClose={canClose}
             onOpenSettings={onOpenSettings} onCommandComplete={onCommandComplete} />
     );
   }
 
-  const kidMins = node.children.map(nodeMin);
+  const kidMins = node.children.map((child)=>nodeMin(child,GAP));
   const gaps = (node.children.length - 1) * GAP;
 
 
@@ -1031,7 +775,7 @@ function Node({ node, folder, runtime, focusId, closingId, focusReq, completedBy
 
     const move = (ev: PointerEvent) => {
       const delta = ((node.axis === 'columns' ? ev.clientX : ev.clientY) - startPos) / avail;
-      onResize(path, clampDelta(i, delta, avail));
+      onResize(folder.id,path,clampDelta(i,delta,avail));
     };
     const up = () => {
       target.classList.remove('dragging');
@@ -1055,7 +799,7 @@ function Node({ node, folder, runtime, focusId, closingId, focusReq, completedBy
     const step = (e.shiftKey ? 64 : 24) / avail;
     const delta = e.key === dec ? -step : e.key === inc ? step
                 : e.key === 'Home' ? -1 : 1;   // clamp turns ±1 into the legal limit
-    onResize(path, clampDelta(i, delta, avail));
+    onResize(folder.id,path,clampDelta(i,delta,avail));
   };
 
   return (
@@ -1071,7 +815,7 @@ function Node({ node, folder, runtime, focusId, closingId, focusReq, completedBy
                  aria-valuenow={Math.round(node.sizes.slice(0, i).reduce((a, b) => a + b, 0) * 100)} />
           ) : null}
           <div className="slot" style={{ flexBasis: 'calc((100% - ' + gaps + 'px) * ' + node.sizes[i] + ')' }}>
-            <Node node={child} folder={folder} runtime={runtime} focusId={focusId} closingId={closingId} focusReq={focusReq}
+            <Node node={child} folder={folder} runtime={runtime} active={active} focusId={focusId} closingId={closingId} focusReq={focusReq}
                   completedByPane={completedByPane} resizing={resizing} onResizeStart={onResizeStart} onResizeEnd={onResizeEnd}
                   onFocus={onFocus} onSplit={onSplit} onClose={onClose} canClose={canClose}
                   onResize={onResize} onOpenSettings={onOpenSettings} onCommandComplete={onCommandComplete} path={path.concat(i)} />
@@ -1092,12 +836,12 @@ function Surface({ folder, runtime, active, focusId, closingId, focusReq, comple
   focusReq: FocusRequest | null;
   completedByPane: Record<string,number>;
   appResizing: boolean;
-  onFocus: (paneId: string) => void;
-  onSplit: (paneId: string, axis: SplitAxis, count: number) => void;
+  onFocus: (folderId:string,paneId:string) => void;
+  onSplit: (folderId:string,paneId:string,axis:SplitAxis,count:number) => void;
   onClose: (paneId: string) => void;
-  onResize: (path: number[], sizes: number[]) => void;
-  onAddFirst: () => void;
-  onOpenSettings: (paneId: string) => void;
+  onResize: (folderId:string,path:number[],sizes:number[]) => void;
+  onAddFirst: (folderId:string) => void;
+  onOpenSettings: (folderId:string,paneId:string) => void;
   onCommandComplete: (event:CommandCompletion) => void;
 }) {
   const viewport = useRef<HTMLDivElement | null>(null);
@@ -1115,8 +859,9 @@ function Surface({ folder, runtime, active, focusId, closingId, focusReq, comple
     return () => ro.disconnect();
   }, []);
 
-  const min = useMemo(() => nodeMin(folder.layout), [folder.layout]);
-  const canClose = countPanes(folder.layout) > 1;
+  const min = useMemo(() => nodeMin(folder.layout,GAP), [folder.layout]);
+  const canClose = useMemo(()=>countPanes(folder.layout)>1,[folder.layout]);
+  const startResizing=useCallback(()=>setResizing(true),[]),endResizing=useCallback(()=>setResizing(false),[]);
 
   return (
     <div className="surface" hidden={!active}>
@@ -1126,15 +871,15 @@ function Surface({ folder, runtime, active, focusId, closingId, focusReq, comple
             width: Math.max(box.w, Math.ceil(min.w)),
             height: Math.max(box.h, Math.ceil(min.h)),
           }}>
-            <Node node={folder.layout} folder={folder} runtime={runtime} focusId={focusId} closingId={closingId} focusReq={focusReq}
+            <Node node={folder.layout} folder={folder} runtime={runtime} active={active} focusId={focusId} closingId={closingId} focusReq={focusReq}
                   completedByPane={completedByPane} resizing={resizing || appResizing}
-                  onResizeStart={() => setResizing(true)} onResizeEnd={() => setResizing(false)}
+                  onResizeStart={startResizing} onResizeEnd={endResizing}
                   onFocus={onFocus} onSplit={onSplit} onClose={onClose} canClose={canClose}
                   onResize={onResize} onOpenSettings={onOpenSettings} onCommandComplete={onCommandComplete} path={[]} />
           </div>
         ) : (
           <div className="empty-add">
-            <button className="ico" title="Add a terminal" aria-label="Add a terminal" onClick={onAddFirst}><Ico.plus /></button>
+            <button className="ico" title="Add a terminal" aria-label="Add a terminal" onClick={()=>onAddFirst(folder.id)}><Ico.plus /></button>
           </div>
         )}
       </div>
@@ -1311,21 +1056,32 @@ function PaneSettings({ node, folder, tmux, onCheckTmux, onChange, onClose }: {
 }) {
   const cmdRef = useRef<HTMLInputElement | null>(null);
   const cmdId = useId();
+  const [commandDraft,setCommandDraft]=useState(node.command);
+  const committedCommand=useRef(node.command);
 
-
+  useEffect(()=>{setCommandDraft(node.command);committedCommand.current=node.command},[node.id,node.command]);
   useEffect(() => {
     const id = setTimeout(() => cmdRef.current?.focus({ preventScroll: true }), 0);
     return () => clearTimeout(id);
   }, []);
+  const commitCommand=()=>{
+    const command=commandDraft.trim()||'bash';
+    setCommandDraft(command);
+    if(command===committedCommand.current)return;
+    committedCommand.current=command;
+    onChange({command});
+  };
+  const finish=()=>{commitCommand();onClose()};
 
   return (
-    <ModalForm variant="panesettings" title="Pane" onClose={onClose} closeLabel="Close pane settings"
-               actions={<ModalActions primary={<Button kind="primary" onClick={onClose}>Done</Button>} />}>
-      <Field label="Command" htmlFor={cmdId} hint={'Runs in ' + folder.cwd}>
-        <input id={cmdId} className="mono ps-input" type="text" value={node.command} spellCheck="false" ref={cmdRef}
+    <ModalForm variant="panesettings" title="Pane" onClose={finish} closeLabel="Close pane settings"
+               actions={<ModalActions primary={<Button kind="primary" onClick={finish}>Done</Button>} />}>
+      <Field label="Command" htmlFor={cmdId} hint={'Runs in '+folder.cwd+'. Press Enter or leave the field to restart the pane.'}>
+        <input id={cmdId} className="mono ps-input" type="text" value={commandDraft} spellCheck="false" ref={cmdRef}
                placeholder="bash"
-               onChange={(e) => onChange({ command: e.target.value })}
-               onBlur={(e) => onChange({ command: e.target.value.trim() || 'bash' })} />
+               onChange={(e) => setCommandDraft(e.target.value)}
+               onBlur={commitCommand}
+               onKeyDown={(e)=>{if(e.key==='Enter'){e.preventDefault();commitCommand()}}} />
       </Field>
       <CheckboxField
         label="Run in tmux"
@@ -1586,6 +1342,36 @@ function ShortcutsDialog({onClose}:{onClose:()=>void}) {
   return <ModalForm variant="shortcuts-dialog" title="Keyboard shortcuts" onClose={onClose}>{groups.map(([title,items])=><section key={title} className="shortcut-group"><h3>{title}</h3>{items.map(([keys,label])=><div key={keys} className="shortcut-row"><kbd>{keys}</kbd><span>{label}</span></div>)}</section>)}</ModalForm>;
 }
 
+function FolderRow({folder,compact,index,active,canRemove,completedByPane,onFocus,onRemove}:{
+  folder:Folder;compact:boolean;index:number;active:boolean;canRemove:boolean;
+  completedByPane:Record<string,number>;onFocus:(folder:Folder)=>void;onRemove:(id:string)=>void;
+}){
+  const label=folderLabel(folder),completed=listPanes(folder.layout).reduce((sum,pane)=>sum+(completedByPane[pane.id]||0),0);
+  const [open,setOpen]=useState(false);
+  const trigger=useRef<HTMLButtonElement|null>(null);
+  useEffect(()=>{if(!open)return;const close=()=>setOpen(false);addEventListener('pointerdown',close);return()=>removeEventListener('pointerdown',close)},[open]);
+  const closeToTrigger=()=>{setOpen(false);requestAnimationFrame(()=>trigger.current?.focus())};
+  return <div className={'folder'+(active?' active':'')} title={label+(index<9?': Alt+'+(index+1):'')}>
+    <button type="button" className="folder-main" aria-current={active?'true':undefined}
+            aria-keyshortcuts={index<9?'Alt+'+(index+1):undefined}
+            aria-label={(compact?label:'Workspace '+label)+(completed?', '+completed+' completed command'+(completed===1?'':'s'):'')+(index<9?', Alt+'+(index+1):'')}
+            onClick={()=>onFocus(folder)} onDoubleClick={()=>go('f',folder.id,'settings')}>
+      <span className="folder-badge">{folder.icon?<WsIcon name={folder.icon}/>:initials(label)}</span>
+      {compact?null:<span className="folder-name">{label}</span>}
+      {completed?<span className="folder-complete" aria-hidden="true"/>:null}
+    </button>
+    {compact?null:<span className={'folder-actions'+(open?' open':'')} onPointerDown={(event)=>event.stopPropagation()}
+      onKeyDown={(event)=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();closeToTrigger()}}}>
+      <button ref={trigger} className="folder-act" title={'Workspace menu: '+label} aria-label={'Workspace menu for '+label}
+              aria-haspopup="menu" aria-expanded={open} onClick={(event)=>{event.stopPropagation();setOpen((value)=>!value)}}><Ico.menu/></button>
+      {open?<span className="folder-menu" role="menu">
+        <button role="menuitem" onClick={(event)=>{event.stopPropagation();setOpen(false);go('f',folder.id,'settings')}}><Ico.gear/><span>Settings</span></button>
+        {canRemove?<button className="danger" role="menuitem" onClick={(event)=>{event.stopPropagation();setOpen(false);onRemove(folder.id)}}><Ico.close/><span>Close</span></button>:null}
+      </span>:null}
+    </span>}
+  </div>;
+}
+
 function App() {
   const testMock = new URLSearchParams(location.search).has('mock');
   const [configured, setConfigured] = useState(() => testMock || hasSavedConfig());
@@ -1607,9 +1393,15 @@ function App() {
   const tmux = tmuxState(capabilities,runtime);
 
   const ui = config.ui;
-  const railOpen = ui.railOpen;
+  const [narrowViewport,setNarrowViewport]=useState(()=>matchMedia('(max-width: 720px)').matches);
+  const [narrowRailOpen,setNarrowRailOpen]=useState(false);
+  const railOpen = narrowViewport ? narrowRailOpen : ui.railOpen;
   const setUi = useCallback((patch: Partial<UiState>) => setConfig((c) => ({ ...c, ui: { ...c.ui, ...patch } })), []);
-  const setRailOpen = useCallback((v: boolean | ((previous:boolean)=>boolean)) => setUi({ railOpen: typeof v === 'function' ? v(railOpen) : v }), [railOpen, setUi]);
+  const setRailOpen = useCallback((value: boolean | ((previous:boolean)=>boolean)) => {
+    const next=typeof value==='function'?value(railOpen):value;
+    if(narrowViewport)setNarrowRailOpen(next);
+    else setUi({railOpen:next});
+  },[narrowViewport,railOpen,setUi]);
 
   const checkCapabilities=useCallback(()=>{
     if(runtime.mode!=='ttyd')return;
@@ -1667,7 +1459,10 @@ function App() {
       notification.onclick=()=>{window.focus();clearCompleted(event.paneId);go('f',event.folderId);setFocusId(event.paneId);setLastPaneByFolder((current)=>({...current,[event.folderId]:event.paneId}));setFocusReq({id:event.paneId,n:Date.now()});notification.close()};
     }catch{}
   },[clearCompleted]);
-  window.__reportCommandCompletion=onCommandComplete;
+  useEffect(()=>{
+    window.__reportCommandCompletion=onCommandComplete;
+    return()=>{if(window.__reportCommandCompletion===onCommandComplete)delete window.__reportCommandCompletion};
+  },[onCommandComplete]);
   useEffect(()=>{
     const acknowledgeFocusedPane=()=>{
       if(document.visibilityState!=='visible'||!document.hasFocus())return;
@@ -1708,12 +1503,11 @@ function App() {
 
 
   useEffect(() => {
-    const mq = matchMedia('(max-width: 720px)');
-    const apply = (e: MediaQueryList | MediaQueryListEvent) => setUi({ railOpen: !e.matches });
-    apply(mq);
-    mq.addEventListener('change', apply);
-    return () => mq.removeEventListener('change', apply);
-  }, [setUi]);
+    const mq=matchMedia('(max-width: 720px)');
+    const apply=(event:MediaQueryListEvent)=>{setNarrowViewport(event.matches);setNarrowRailOpen(false)};
+    mq.addEventListener('change',apply);
+    return()=>mq.removeEventListener('change',apply);
+  },[]);
 
   const patchFolder = useCallback((id: string, fn: (folder:Folder)=>Folder) => {
     setConfig((c) => ({ ...c, folders: c.folders.map((f) => (f.id === id ? fn(f) : f)) }));
@@ -1724,9 +1518,9 @@ function App() {
     patchFolder(folderId, (f) => (f.doc ? { ...f, theme } : f));
   }, [patchFolder]);
 
-  const onSplit = useCallback((paneId: string, axis: SplitAxis, count: number) => {
-    patchFolder(active.id, (f) => ({ ...f, layout: splitPane(f.layout, paneId, axis, count, tmux.state === 'present') }));
-  }, [active, patchFolder, tmux.state]);
+  const onSplit=useCallback((folderId:string,paneId:string,axis:SplitAxis,count:number)=>{
+    patchFolder(folderId,(folder)=>({...folder,layout:splitPane(folder.layout,paneId,axis,count,tmux.state==='present')}));
+  },[patchFolder,tmux.state]);
 
 
   const commitClose = useCallback(() => {
@@ -1737,8 +1531,8 @@ function App() {
   },[active,patchFolder,confirmCloseId]);
   const onClose = useCallback((paneId: string) => setConfirmCloseId(paneId), []);
 
-  const onResize = useCallback((path: number[], sizes: number[]) => {
-    patchFolder(active.id, (f) => {
+  const onResize=useCallback((folderId:string,path:number[],sizes:number[])=>{
+    patchFolder(folderId,(f)=>{
       const walk = (node: LayoutNode, depth: number): LayoutNode => {
         if (depth === path.length) return node.type==='split' ? { ...node, sizes } : node;
         const i = path[depth];
@@ -1749,11 +1543,11 @@ function App() {
       };
       return { ...f, layout: f.layout ? walk(f.layout, 0) : null };
     });
-  }, [active, patchFolder]);
+  },[patchFolder]);
 
-  const addFirstPane = useCallback(() => {
-    patchFolder(active.id, (f) => ({ ...f, layout: pane('bash', tmux.state === 'present') }));
-  }, [active, patchFolder, tmux.state]);
+  const addFirstPane=useCallback((folderId:string)=>{
+    patchFolder(folderId,(folder)=>({...folder,layout:pane('bash',tmux.state==='present')}));
+  },[patchFolder,tmux.state]);
 
   const removeFolder = useCallback((id: string) => {
     setConfig((c) => {
@@ -1810,6 +1604,11 @@ function App() {
   }, [showNewDlg, newDraft]);
 
 
+  const onPaneFocus=useCallback((folderId:string,paneId:string)=>{
+    clearCompleted(paneId);setFocusId(paneId);setLastPaneByFolder((current)=>({...current,[folderId]:paneId}));
+  },[clearCompleted]);
+  const openPaneSettings=useCallback((folderId:string,paneId:string)=>go('f',folderId,'pane',paneId),[]);
+
   const onPaneChange = useCallback((paneId: string, patch: Partial<PaneNode>) => {
     patchFolder(active.id, (f) => ({
       ...f,
@@ -1823,44 +1622,9 @@ function App() {
   };
 
 
-  const FolderRow = ({ f, compact, index }: {f:Folder;compact:boolean;index:number}) => {
-    const label = folderLabel(f),completed=listPanes(f.layout).reduce((sum,p)=>sum+(completedByPane[p.id]||0),0);
-    const [open,setOpen]=useState(false);
-    useEffect(()=>{if(!open)return;const close=()=>setOpen(false);addEventListener('pointerdown',close);return()=>removeEventListener('pointerdown',close)},[open]);
-    return (
-      <div className={'folder' + (f.id === active.id ? ' active' : '')}
-           title={label + (index < 9 ? ': Alt+' + (index + 1) : '')}>
-        <button type="button" className="folder-main"
-                aria-current={f.id === active.id ? 'true' : undefined}
-                aria-keyshortcuts={index<9?'Alt+'+(index+1):undefined}
-                aria-label={(compact?label:'Workspace '+label)+(completed?', '+completed+' completed command'+(completed===1?'':'s'):'')+(index<9?', Alt+'+(index+1):'')}
-                onClick={() => focusFolderPane(f)}
-                onDoubleClick={() => go('f', f.id, 'settings')}>
-          <span className="folder-badge">
-            {f.icon ? <WsIcon name={f.icon} /> : initials(label)}
-          </span>
-          {compact ? null : <span className="folder-name">{label}</span>}
-          {completed ? <span className="folder-complete" aria-hidden="true" /> : null}
-        </button>
-        {compact ? null : (
-
-          <span className={'folder-actions' + (open ? ' open' : '')}
-                onPointerDown={e=>e.stopPropagation()}
-                onKeyDown={(e)=>{if(e.key==='Escape'){e.preventDefault();e.stopPropagation();setOpen(false)}}}>
-            <button className="folder-act" title={'Workspace menu: '+label} aria-label={'Workspace menu for '+label} aria-haspopup="menu" aria-expanded={open}
-                    onClick={(e)=>{e.stopPropagation();setOpen(v=>!v)}}><Ico.menu /></button>
-            {open?<span className="folder-menu" role="menu">
-              <button role="menuitem" onClick={(e)=>{e.stopPropagation();setOpen(false);go('f',f.id,'settings')}}><Ico.gear/><span>Settings</span></button>
-              {folders.length>1?<button className="danger" role="menuitem" onClick={(e)=>{e.stopPropagation();setOpen(false);removeFolder(f.id)}}><Ico.close/><span>Close</span></button>:null}
-            </span>:null}
-          </span>
-        )}
-      </div>
-    );
-  };
-
   return (
     <DocThemeContext.Provider value={setDocTheme}>
+    <TerminalAppearanceContext.Provider value={ui.fontSize+':'+ui.fontWeight}>
     <div className="shell" data-appearance={activeTheme.appearance} data-version={APP_VERSION}
          style={{...chromeVars(activeTheme),'--term-font-size':ui.fontSize+'px','--term-font-weight':FONT_WEIGHTS.find(({key})=>key===ui.fontWeight)?.value||400}}>
       {}
@@ -1881,7 +1645,9 @@ function App() {
         </div>
         {}
         <div className="rail-list">
-          {folders.map((f,index) => <FolderRow key={f.id} f={f} index={index} compact={!railOpen} />)}
+          {folders.map((folder,index)=><FolderRow key={folder.id} folder={folder} index={index} compact={!railOpen}
+            active={folder.id===active.id} canRemove={folders.length>1} completedByPane={completedByPane}
+            onFocus={focusFolderPane} onRemove={removeFolder}/>)}
           <button className="ico add" title="New workspace" aria-label="New folder"
                   onClick={() => go('new')}><Ico.plus /></button>
         </div>
@@ -1911,11 +1677,10 @@ function App() {
       <main className="stage">
         {runtime.mode !== 'ttyd' && runtime.mode !== 'mock' ? <SetupNotice mode={runtime.mode} onRetry={()=>{setRuntime({mode:'probing'});detectRuntime().then(setRuntime)}} /> : null}
         {folders.map((f) => (
-          <Surface key={f.id} folder={f} runtime={runtime} active={f.id === active.id} focusId={focusId} appResizing={appResizing}
+          <Surface key={f.id} folder={f} runtime={runtime} active={f.id===active.id} focusId={focusId} appResizing={appResizing}
                    closingId={closingId} focusReq={focusReq} completedByPane={completedByPane}
-                   onFocus={(id)=>{clearCompleted(id);setFocusId(id);setLastPaneByFolder(v=>({...v,[f.id]:id}))}} onSplit={onSplit} onClose={onClose} onResize={onResize}
-                   onAddFirst={addFirstPane}
-                   onOpenSettings={(id) => go('f', f.id, 'pane', id)} onCommandComplete={onCommandComplete} />
+                   onFocus={onPaneFocus} onSplit={onSplit} onClose={onClose} onResize={onResize}
+                   onAddFirst={addFirstPane} onOpenSettings={openPaneSettings} onCommandComplete={onCommandComplete} />
         ))}
       </main>
 
@@ -1981,6 +1746,7 @@ function App() {
       </ModalShell>
       <ModalShell open={showShortcuts} onClose={closeDialog}><ShortcutsDialog onClose={closeDialog}/></ModalShell>
     </div>
+    </TerminalAppearanceContext.Provider>
     </DocThemeContext.Provider>
   );
 }

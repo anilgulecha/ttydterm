@@ -171,3 +171,15 @@ These rules apply to terminal workspaces and other single-file browser tools.
 53. Do not collapse capability absence and probe failure into one UI state. A
     genuine PATH miss, a read-only ttyd, and a failed WebSocket need different
     explanations plus a retry path.
+
+54. Configuration fields that restart a process or connection need local edit
+    drafts and an explicit commit boundary. Persisting each keystroke can run
+    partial commands, churn sockets, and make destructive prefixes executable.
+
+55. Dependency-less layout effects are multiplicative in mounted workspaces.
+    Scope style reads and terminal fitting to actual appearance changes, then
+    measure fit calls at realistic pane counts before adding memoization.
+
+56. Components with local interaction state must have stable component identity.
+    Defining them inside a parent render silently remounts them and can close
+    menus or discard focus whenever unrelated state changes.

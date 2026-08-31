@@ -103,6 +103,7 @@ declare namespace React {
   function createElement(type: unknown, props?: unknown, ...children: unknown[]): ReactElement;
 
   function createContext<T>(defaultValue: T): Context<T>;
+  function memo<T>(component: T): T;
   function useContext<T>(context: Context<T>): T;
   function useState<S>(initial: S | (() => S)): [S, (value: S | ((previous: S) => S)) => void];
   function useEffect(effect: () => void | (() => void), deps?: readonly unknown[]): void;

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef,
 import { createRoot } from 'react-dom/client';
 import { paneLaunchCommand, shellCwd, shellQuote, tmuxLaunchCommand, ttydLaunchCommand } from './commands';
 import { DOC_PAGES, docPage } from './docs';
+import { updateFavicon } from './favicon';
 import { CountGlyph, Ico, WS_ICONS, WS_ICON_KEYS, WsIcon } from './icons';
 import { countPanes, equal, findPane, listPanes, mapTree, nodeMin, normalize, pane, removePane, splitPane, uid } from './layout';
 import type { DocBlock, DocPage, DocSection, DocSpan } from './docs';
@@ -1425,9 +1426,11 @@ function App() {
 
   if(!active) throw new Error('Configuration has no folders');
   const activeTheme = THEMES[active.theme] || THEMES.paper;
+  const hasAttention=useMemo(()=>folders.some((folder)=>listPanes(folder.layout).some((item)=>(completedByPane[item.id]||0)>0)),[folders,completedByPane]);
   const configRef=useRef(config),activeIdRef=useRef(active.id);
   configRef.current=config;activeIdRef.current=active.id;
   useEffect(() => { document.documentElement.style.colorScheme = activeTheme.appearance; }, [activeTheme.appearance]);
+  useEffect(()=>updateFavicon(activeTheme,hasAttention?'attention':'normal'),[activeTheme,hasAttention]);
   useEffect(() => {
     try { localStorage.setItem(BG_KEY, String(chromeVars(activeTheme)['--stage-bg'])); } catch {}
   }, [activeTheme]);

@@ -183,3 +183,7 @@ These rules apply to terminal workspaces and other single-file browser tools.
 56. Components with local interaction state must have stable component identity.
     Defining them inside a parent render silently remounts them and can close
     menus or discard focus whenever unrelated state changes.
+
+57. Dynamic favicons should be low-frequency, privacy-safe supplements to visible
+    state. Render them from trusted theme tokens, use a static offline fallback,
+    avoid names and commands, and never rely on color alone for attention.

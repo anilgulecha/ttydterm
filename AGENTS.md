@@ -32,6 +32,10 @@ Canonical source lives in `src/`; `index.html` is generated.
 - `src/modal.tsx`: shared modal and form primitives
 - `src/types.ts`: configuration and runtime domain types
 - `src/commands.ts`: shell and tmux command construction
+- `src/themes.ts`: theme data, contrast auditing, and semantic token mapping
+- `src/layout.ts`: pure pane-tree construction, traversal, and sizing
+- `src/icons.tsx`: application and workspace SVG icon components
+- `src/favicon.ts`: deterministic theme-aware favicon rendering
 - `src/styles.css`: all styling and semantic theme tokens
 - `src/template.html`: generated document shell
 - `src/vendor-types/`: pinned local declarations for global runtime libraries

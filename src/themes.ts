@@ -27,6 +27,7 @@ export const contrastAudit = () => {
   for(const [name,t] of Object.entries(THEMES)){
     text.forEach((key)=>out.push({theme:name,key,kind:'text',ratio:+contrast(t[key],t.bg).toFixed(2),min:4.5}));
     out.push({theme:name,key:'focus-ring',kind:'ui',ratio:+contrast(t.blue,t.bg).toFixed(2),min:3});
+    out.push({theme:name,key:'favicon-attention',kind:'ui',ratio:+contrast(t.ui.warning,t.bg).toFixed(2),min:3});
     out.push({theme:name,key:'terminal-selection',kind:'text',ratio:+contrast(t.bg,t.blue).toFixed(2),min:4.5});
     out.push({theme:name,key:'ui-text/sidebar',kind:'text',ratio:+contrast(t.ui.text,t.ui.sidebar).toFixed(2),min:4.5});
     out.push({theme:name,key:'ui-muted/sidebar',kind:'text',ratio:+contrast(t.ui.muted,t.ui.sidebar).toFixed(2),min:4.5});

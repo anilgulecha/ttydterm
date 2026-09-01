@@ -110,6 +110,14 @@ ok('release 1.4 is a compact superscript beside the wordmark and exposed on the 
   document.querySelector('.brand-version')?.textContent === '1.4' &&
   document.querySelector('.brand-version')?.getAttribute('aria-label') === 'version 1.4' &&
   document.querySelector('.shell')?.getAttribute('data-version') === '1.4'));
+const faviconBoot=await page.evaluate(()=>{
+  const links=[...document.querySelectorAll('link[rel~="icon"]')],link=links[0],href=link?.getAttribute('href')||'';
+  return {count:links.length,state:link?.dataset.state,href,svg:href.startsWith('data:image/svg+xml,')?decodeURIComponent(href.slice(href.indexOf(',')+1)):''};
+});
+ok('the app boots with one offline SVG terminal favicon',faviconBoot.count===1&&faviconBoot.state==='normal'&&
+  faviconBoot.svg.includes('viewBox="0 0 64 64"')&&faviconBoot.svg.includes('data-state="normal"')&&faviconBoot.svg.includes('M16 20l11 10-11 10'),JSON.stringify(faviconBoot));
+ok('favicon data contains only theme colors and no workspace or shell details',
+  ['kalviumjr','~/work','npm run dev','git status','user:password'].every((value)=>!faviconBoot.svg.includes(value)));
 ok('fresh sidebar uses the compact 176px default', Math.abs((await page.locator('.rail').evaluate((el) => el.getBoundingClientRect().width)) - 176) < 1);
 
 const folderNames = await page.$$eval('.folder-name', (n) => n.map((e) => e.textContent));
@@ -824,12 +832,20 @@ await page.waitForTimeout(40);
 ok('short commands and long commands in the visible focused pane do not create attention markers',
   (await page.locator('.folder').first().locator('.folder-complete').count())===0 &&
   (await page.locator('.pane-complete').count())===0 && await page.evaluate(()=>window.__notifications.length===0));
+ok('the favicon stays unbadged without outstanding command attention',await page.evaluate(()=>{
+  const link=document.querySelector('link[data-ttydterm-favicon]'),svg=decodeURIComponent((link?.getAttribute('href')||'').split(',').slice(1).join(','));
+  return link?.dataset.state==='normal'&&svg.includes('data-state="normal"')&&!svg.includes('<circle');
+}));
 await page.evaluate(({folderId,otherPaneId})=>
   window.__reportCommandCompletion({folderId,paneId:otherPaneId,exitStatus:0,duration:5000}),firstCompletion);
 await page.waitForTimeout(40);
 ok('a five-second command in an unfocused pane marks both the pane and workspace',
   (await page.locator(`[data-pane-id="${firstCompletion.otherPaneId}"] .pane-complete`).count())===1 &&
   (await page.locator('.folder').first().locator('.folder-complete').count())===1);
+ok('outstanding command attention adds a static high-contrast favicon dot',await page.evaluate(()=>{
+  const link=document.querySelector('link[data-ttydterm-favicon]'),svg=decodeURIComponent((link?.getAttribute('href')||'').split(',').slice(1).join(','));
+  return link?.dataset.state==='attention'&&svg.includes('data-state="attention"')&&svg.includes('<circle cx="52" cy="12" r="9"');
+}));
 ok('completion indicators expose their count in pane and workspace accessible names',
   (await page.locator(`[data-pane-id="${firstCompletion.otherPaneId}"]`).getAttribute('aria-label')).includes('1 completed command') &&
   (await page.locator('.folder-main').first().getAttribute('aria-label')).includes('1 completed command'));
@@ -837,6 +853,10 @@ await page.locator(`[data-pane-id="${firstCompletion.otherPaneId}"]`).click();
 ok('focusing the marked pane clears its pane and workspace indicators',
   (await page.locator(`[data-pane-id="${firstCompletion.otherPaneId}"] .pane-complete`).count())===0 &&
   (await page.locator('.folder').first().locator('.folder-complete').count())===0);
+ok('acknowledging the final completed command removes the favicon dot',await page.evaluate(()=>{
+  const link=document.querySelector('link[data-ttydterm-favicon]'),svg=decodeURIComponent((link?.getAttribute('href')||'').split(',').slice(1).join(','));
+  return link?.dataset.state==='normal'&&!svg.includes('<circle');
+}));
 await page.evaluate(()=>window.__notifications=[]);
 await page.evaluate(({folderId,otherPaneId})=>{
   Object.defineProperty(document,'hasFocus',{configurable:true,value:()=>false});
@@ -1175,7 +1195,7 @@ const textFails = audit.filter((r) => r.kind === 'text' && r.ratio < r.min);
 ok('every theme colour that carries text clears AA (4.5:1)', textFails.length === 0,
   textFails.map((f) => `${f.theme}.${f.key}=${f.ratio}`).join(', '));
 const uiFails = audit.filter((r) => r.kind === 'ui' && r.ratio < r.min);
-ok('every focus ring clears the 3:1 non-text minimum', uiFails.length === 0,
+ok('every focus ring and favicon marker clears the 3:1 non-text minimum', uiFails.length === 0,
   uiFails.map((f) => `${f.theme}.${f.key}=${f.ratio}`).join(', '));
 const dimWorst = Math.min(...audit.filter((r) => r.key === 'dim').map((r) => r.ratio));
 ok('the dimmest text in any theme still clears AA', dimWorst >= 4.5, 'worst dim = ' + dimWorst);
@@ -1232,17 +1252,21 @@ const railLook = () => page.evaluate(() => {
 });
 const railNight = await railLook();
 const stageNight = await page.locator('.shell').evaluate((el) => getComputedStyle(el).backgroundColor);
+const faviconNight=await page.locator('link[data-ttydterm-favicon]').getAttribute('href');
 
 await page.locator('.folder').nth(2).click();   // notes = paper (light)
 await page.waitForTimeout(260);
 const railPaper = await railLook();
 const stagePaper = await page.locator('.shell').evaluate((el) => getComputedStyle(el).backgroundColor);
+const faviconPaper=await page.locator('link[data-ttydterm-favicon]').getAttribute('href');
 
 const railDiff = Object.keys(railNight).filter((k) => railNight[k] !== railPaper[k]);
 ok('the sidebar repaints from the active workspace theme', railDiff.length >= 4,
   railDiff.map((k) => `${k}: ${railNight[k]} vs ${railPaper[k]}`).join(' | '));
 ok('the stage repaints from the active workspace theme', stageNight !== stagePaper,
   `${stageNight} vs ${stagePaper}`);
+ok('the favicon follows the active workspace theme without exposing its name',faviconNight!==faviconPaper&&
+  !decodeURIComponent(faviconPaper).includes('notes'),String(faviconNight===faviconPaper));
 const paperRing = await page.locator('.surface:not([hidden]) .pane').first()
   .evaluate((el) => getComputedStyle(el).getPropertyValue('--t-ring').trim());
 await page.locator('.folder').first().click();
@@ -1354,6 +1378,9 @@ await demo.goto(RAW_BASE, { waitUntil: 'networkidle' });
 await demo.waitForSelector('.setup-notice');
 await demo.waitForSelector('.surface:not([hidden]) .doc-term[data-doc="readme"]');
 ok('static documentation has no console/page errors', demoErrors.length === 0, demoErrors.join(' | '));
+ok('demo mode keeps the offline programmatic favicon active',await demo.evaluate(()=>{
+  const link=document.querySelector('link[data-ttydterm-favicon]');return link?.getAttribute('href')?.startsWith('data:image/svg+xml,')&&link.dataset.state==='normal';
+}));
 await demo.locator('.ico[aria-label="New folder"]').click();
 await demo.waitForSelector('dialog[open]');
 ok('static mode resolves tmux as unavailable instead of checking forever',await demo.evaluate(()=>{
@@ -1553,6 +1580,16 @@ ok('static hosting migrates rather than replacing a saved real-workspace configu
 await savedContext.close();
 await demoContext.close();
 
+const fileContext=await browser.newContext();
+const filePage=await fileContext.newPage();
+await filePage.goto(new URL('index.html',import.meta.url).href,{waitUntil:'domcontentloaded'});
+await filePage.waitForSelector('.surface:not([hidden]) .doc-term');
+ok('file mode uses the same self-contained favicon without a network request',await filePage.evaluate(()=>{
+  const links=[...document.querySelectorAll('link[rel~="icon"]')],href=links[0]?.getAttribute('href')||'';
+  return links.length===1&&href.startsWith('data:image/svg+xml,')&&links[0].dataset.state==='normal';
+}));
+await fileContext.close();
+
 const railPreferenceContext=await browser.newContext({viewport:{width:1440,height:900}});
 await railPreferenceContext.addInitScript(()=>localStorage.setItem('ttyd-workspace-v2',JSON.stringify({
   version:7,ui:{railWidth:176,railOpen:false,fontSize:13,fontWeight:'regular',notifyOnCommandFinish:false},
@@ -1642,6 +1679,9 @@ const lifecyclePage=await lifecycleContext.newPage();
 await lifecyclePage.route('**/token',(route)=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({token:'test-token'})}));
 await lifecyclePage.goto(RAW_BASE,{waitUntil:'domcontentloaded'});
 await lifecyclePage.waitForFunction(()=>document.querySelectorAll('.connection-ready').length===2);
+ok('ttyd mode keeps the same-origin offline favicon active',await lifecyclePage.evaluate(()=>{
+  const link=document.querySelector('link[data-ttydterm-favicon]');return link?.getAttribute('href')?.startsWith('data:image/svg+xml,')&&link.dataset.state==='normal';
+}));
 await lifecyclePage.locator('.surface:not([hidden]) .pane').click();
 await lifecyclePage.waitForFunction(()=>window.__fakeSockets.some((socket)=>socket.sent.some((value)=>value.includes('p-one')))&&
   window.__fakeSockets.some((socket)=>socket.sent.some((value)=>value.includes('p-two'))));

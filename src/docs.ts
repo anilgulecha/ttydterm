@@ -96,7 +96,7 @@ const readmeKeyboard: DocSection = {
       { term:'Ctrl/⌘ + Shift + ,', detail:'open workspace settings' },
       { term:'Escape', detail:'close a menu or dialog' },
     ] },
-    { kind: 'para', spans: [t('Right-click a pane for splits, paste, settings, and close. Hover a multi-pane workspace for its top-left exchange handles. Drag a handle onto another pane, or focus it and use Enter, the arrow keys, and Enter again.')] },
+    { kind: 'para', spans: [t('Right-click a pane for splits, paste, settings, and close. Move to the top-left corner of a pane to reveal its exchange handle. Drag the handle onto another pane, or focus it and use Enter, the arrow keys, and Enter again.')] },
   ],
 };
 

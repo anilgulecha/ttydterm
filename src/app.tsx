@@ -633,7 +633,7 @@ type PaneMenu = { source: 'trigger' | 'context'; x: number; y: number };
 interface FocusRequest { id: string; n?: number; nonce?: number }
 
 const Pane=React.memo(function Pane({ node, folder, runtime, active, focused, completed, closing, focusReq, resizing, useTmux,
-               frame, exchangeRole, exchangeActive, canExchange, position, paneCount,
+               frame, exchangeRole, canExchange, position, paneCount,
                onFocus, onSplit, onClose, canClose, onOpenSettings, onOpenWorkspaceSettings, onCommandComplete, onOutputActivity,
                onExchangePointer, onExchangeKey }: {
   node: PaneNode;
@@ -648,7 +648,6 @@ const Pane=React.memo(function Pane({ node, folder, runtime, active, focused, co
   useTmux: boolean|null;
   frame: Frame;
   exchangeRole: 'source' | 'target' | null;
-  exchangeActive: boolean;
   canExchange: boolean;
   position: number;
   paneCount: number;
@@ -664,6 +663,7 @@ const Pane=React.memo(function Pane({ node, folder, runtime, active, focused, co
   onExchangeKey: (paneId:string, event:React.KeyboardEvent<HTMLButtonElement>) => void;
 }) {
   const [menu, setMenu] = useState<PaneMenu | null>(null);
+  const [gripVisible,setGripVisible]=useState(false);
   const ref = useRef<HTMLDivElement | null>(null),menuRef=useRef<HTMLDivElement|null>(null);
   const accent = themeOf(folder.theme);
 
@@ -707,7 +707,7 @@ const Pane=React.memo(function Pane({ node, folder, runtime, active, focused, co
     <div
       ref={ref}
       className={'pane' + (focused ? ' focused' : '') + (closing ? ' closing' : '')
-        + (exchangeRole ? ' exchange-' + exchangeRole : '') + (exchangeActive ? ' exchanging' : '')}
+        + (exchangeRole ? ' exchange-' + exchangeRole : '')}
       style={{ ...themeVars(accent), '--t-ring': accent.blue,
         left: frame.x + 'px', top: frame.y + 'px', width: frame.w + 'px', height: frame.h + 'px' }}
       data-pane-id={node.id}
@@ -722,6 +722,14 @@ const Pane=React.memo(function Pane({ node, folder, runtime, active, focused, co
       }}
       onMouseDownCapture={(event:React.MouseEvent<HTMLDivElement>)=>{if(useTmux&&event.button===1)event.stopPropagation()}}
       onAuxClickCapture={(event:React.MouseEvent<HTMLDivElement>)=>{if(useTmux&&event.button===1)event.stopPropagation()}}
+      onPointerMoveCapture={(event:React.PointerEvent<HTMLDivElement>)=>{
+        if(!canExchange)return;
+        const bounds=ref.current?.getBoundingClientRect();
+        if(!bounds)return;
+        const next=event.clientX>=bounds.left&&event.clientX<=bounds.left+54&&event.clientY>=bounds.top&&event.clientY<=bounds.top+54;
+        setGripVisible((current)=>current===next?current:next);
+      }}
+      onPointerLeave={()=>setGripVisible(false)}
       onFocus={focusPane}
 
       onContextMenu={(e) => {
@@ -740,7 +748,7 @@ const Pane=React.memo(function Pane({ node, folder, runtime, active, focused, co
 
       {}
       {canExchange ? (
-        <div className={'pane-grip'+(exchangeActive?' open':'')} onPointerDown={(e)=>e.stopPropagation()}>
+        <div className={'pane-grip'+(gripVisible?' visible':'')} onPointerDown={(e)=>e.stopPropagation()}>
           <button className="pico" type="button"
                   title="Exchange this terminal with another pane"
                   aria-label={'Exchange terminal ' + position + ' of ' + paneCount + ', drag or press Enter then use arrow keys'}
@@ -1053,7 +1061,7 @@ function Surface({ folder, runtime, active, focusId, closingId, focusReq, comple
                     resizing={resizing || appResizing || !!exchange} useTmux={useTmux}
                     frame={{ x: item.x, y: item.y, w: item.w, h: item.h }}
                     exchangeRole={exchange ? (exchange.source === item.pane.id ? 'source' : exchange.target === item.pane.id ? 'target' : null) : null}
-                    exchangeActive={!!exchange} canExchange={canExchange}
+                    canExchange={canExchange}
                     position={index + 1} paneCount={paneFrames.length}
                     onFocus={onFocus} onSplit={onSplit} onClose={onClose} canClose={canClose}
                     onOpenSettings={onOpenSettings} onOpenWorkspaceSettings={onOpenWorkspaceSettings}

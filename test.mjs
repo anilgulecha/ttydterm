@@ -106,10 +106,10 @@ ok('social previews use the published product screenshot', await page.evaluate((
     content('meta[name="twitter:image"]')==='https://www.gulecha.org/ttydterm/docs/ttydterm.png';
 }));
 ok('hash route settled on a folder', /#\/f\//.test(page.url()), page.url());
-ok('release 1.6 is a compact superscript beside the wordmark and exposed on the shell',await page.evaluate(()=>
-  document.querySelector('.brand-version')?.textContent==='1.6'&&
-  document.querySelector('.brand-version')?.getAttribute('aria-label')==='version 1.6'&&
-  document.querySelector('.shell')?.getAttribute('data-version')==='1.6'));
+ok('release 1.6.1 is a compact superscript beside the wordmark and exposed on the shell',await page.evaluate(()=>
+  document.querySelector('.brand-version')?.textContent==='1.6.1'&&
+  document.querySelector('.brand-version')?.getAttribute('aria-label')==='version 1.6.1'&&
+  document.querySelector('.shell')?.getAttribute('data-version')==='1.6.1'));
 const faviconBoot=await page.evaluate(()=>{
   const links=[...document.querySelectorAll('link[rel~="icon"]')],link=links[0],href=link?.getAttribute('href')||'';
   return {count:links.length,state:link?.dataset.state,href,svg:href.startsWith('data:image/svg+xml,')?decodeURIComponent(href.slice(href.indexOf(',')+1)):''};
@@ -173,7 +173,7 @@ ok('the collapse control shares the workspace icon column', await page.evaluate(
 ok('the release uses a light superscript pill immediately after ttydterm',await page.evaluate(()=>{
   const name=document.querySelector('.brand-name'),badge=document.querySelector('.brand-version');if(!badge||!name)return false;
   const b=badge.getBoundingClientRect(),n=name.getBoundingClientRect(),style=getComputedStyle(badge);
-  return badge.textContent==='1.6'&&b.left>=n.right&&b.top<n.top+n.height/2&&b.height<n.height&&parseFloat(style.borderRadius)>=6&&style.boxShadow!=='none';
+  return badge.textContent==='1.6.1'&&b.left>=n.right&&b.top<n.top+n.height/2&&b.height<n.height&&parseFloat(style.borderRadius)>=6&&style.boxShadow!=='none';
 }));
 ok('workspace icons have no decorative line markers',await page.evaluate(()=>
   [...document.querySelectorAll('.folder-badge')].every((badge)=>getComputedStyle(badge,'::after').content==='none')));
@@ -499,9 +499,31 @@ await firstPane.hover();
 
 const restingControls=await firstPane.locator(':scope > :is(.pane-grip,.rail-pane) > .pico').count();
 ok('multi-pane terminals expose one exchange handle and one menu control',restingControls===2,String(restingControls));
-ok('the top-left exchange handle leaves terminal text unobstructed',await firstPane.evaluate((pane)=>{
-  const grip=pane.querySelector('.pane-grip button')?.getBoundingClientRect(),term=pane.querySelector('.term'),content=(term.querySelector('.xterm-host')||term.querySelector('.term-body'))?.getBoundingClientRect();return !!grip&&!!content&&grip.bottom<=content.top;
+const exchangeGrip=firstPane.locator(':scope > .pane-grip > .pico');
+ok('the exchange handle stays hidden away from its top-left hotspot',await exchangeGrip.evaluate((grip)=>{
+  const style=getComputedStyle(grip);return style.opacity==='0'&&style.pointerEvents==='none';
 }));
+const terminalContentBox=()=>firstPane.evaluate((pane)=>{
+  const term=pane.querySelector('.term'),content=term?.querySelector('.xterm-host')||term?.querySelector('.term-body');
+  if(!content)return null;const box=content.getBoundingClientRect();return {x:box.x,y:box.y,w:box.width,h:box.height};
+});
+const contentAtRest=await terminalContentBox();
+ok('the exchange handle overlays terminal content without reserving a top strip',await firstPane.evaluate((pane)=>{
+  const paneBox=pane.getBoundingClientRect(),grip=pane.querySelector('.pane-grip button')?.getBoundingClientRect();
+  const term=pane.querySelector('.term'),content=(term?.querySelector('.xterm-host')||term?.querySelector('.term-body'))?.getBoundingClientRect();
+  return !!grip&&!!content&&content.top-paneBox.top<=13&&grip.top<content.bottom&&grip.bottom>content.top;
+}));
+const firstPaneBox=await firstPane.boundingBox();
+await page.mouse.move(firstPaneBox.x+12,firstPaneBox.y+12);
+await page.waitForFunction(()=>getComputedStyle(document.querySelector('.surface:not([hidden]) .pane .pane-grip button')).opacity==='1');
+ok('only the top-left pane area reveals the overlaid exchange handle',sameBox(contentAtRest,await terminalContentBox(),.5));
+await firstPane.focus();await firstPane.hover();
+await page.waitForFunction(()=>getComputedStyle(document.querySelector('.surface:not([hidden]) .pane .pane-grip button')).opacity==='0');
+await exchangeGrip.focus();
+await page.waitForFunction(()=>getComputedStyle(document.querySelector('.surface:not([hidden]) .pane .pane-grip button')).opacity==='1');
+ok('keyboard focus reveals the exchange handle without moving terminal content',
+  sameBox(contentAtRest,await terminalContentBox(),.5));
+await firstPane.focus();
 
 await firstPane.locator('.pico[aria-label="Pane menu"]').click();
 await page.waitForSelector('.panepop');
@@ -641,6 +663,8 @@ ok('pane exchange marks distinct source and destination panes',await page.evalua
   document.querySelector(`[data-pane-id="${sourceId}"]`)?.classList.contains('exchange-source')&&
   document.querySelector(`[data-pane-id="${targetId}"]`)?.classList.contains('exchange-target')&&
   document.querySelectorAll('.pane-exchange-cue').length===2,{sourceId,targetId}));
+ok('pane exchange keeps its colored cues static',await page.evaluate(()=>
+  [...document.querySelectorAll('.pane-exchange-cue')].every((cue)=>getComputedStyle(cue).animationName==='none')));
 await page.screenshot({path:`${SHOTS}/21-pane-exchange.png`});
 await page.mouse.up();await page.waitForTimeout(100);
 const sourceAfter=await slotOf(page.locator(`[data-pane-id="${sourceId}"]`)),targetAfter=await slotOf(page.locator(`[data-pane-id="${targetId}"]`));

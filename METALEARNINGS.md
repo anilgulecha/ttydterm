@@ -225,3 +225,7 @@ These rules apply to terminal workspaces and other single-file browser tools.
 67. Drag cancellation is a complete interaction path. Release capture, stop edge
     scrolling, clear every transient cue, suppress the trailing click, and restore
     keyboard focus without disposing the controlled resource.
+
+68. Overlay controls must not buy visibility with permanent content padding. Reveal
+    them only inside a bounded discovery area, keep the resource surface full-size,
+    and preserve a keyboard focus path that does not move the content beneath it.

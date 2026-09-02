@@ -70,7 +70,7 @@ const readmeFeatures: DocSection = {
     { kind: 'heading', text: 'Features' },
     { kind: 'list', items: [
       [em('Workspaces:'), t(' Keep projects and terminals separate, then drag their icons to set the order.')],
-      [em('Split panes:'), t(' Arrange rows and columns.')],
+      [em('Split panes:'), t(' Arrange rows and columns, then exchange running terminals between pane slots.')],
       [em('Pane setup:'), t(' Choose each command and working directory.')],
       [em('tmux continuity:'), t(' Keep processes running through disconnects.')],
       [em('Completion alerts:'), t(' Mark finished commands and notify when away.')],
@@ -96,7 +96,7 @@ const readmeKeyboard: DocSection = {
       { term:'Ctrl/⌘ + Shift + ,', detail:'open workspace settings' },
       { term:'Escape', detail:'close a menu or dialog' },
     ] },
-    { kind: 'para', spans: [t('Right-click a pane for splits, paste, settings, and close.')] },
+    { kind: 'para', spans: [t('Right-click a pane for splits, paste, settings, and close. Hover a multi-pane workspace for its top-left exchange handles. Drag a handle onto another pane, or focus it and use Enter, the arrow keys, and Enter again.')] },
   ],
 };
 

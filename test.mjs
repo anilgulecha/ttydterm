@@ -106,10 +106,10 @@ ok('social previews use the published product screenshot', await page.evaluate((
     content('meta[name="twitter:image"]')==='https://www.gulecha.org/ttydterm/docs/ttydterm.png';
 }));
 ok('hash route settled on a folder', /#\/f\//.test(page.url()), page.url());
-ok('release 1.5 is a compact superscript beside the wordmark and exposed on the shell', await page.evaluate(() =>
-  document.querySelector('.brand-version')?.textContent === '1.5' &&
-  document.querySelector('.brand-version')?.getAttribute('aria-label') === 'version 1.5' &&
-  document.querySelector('.shell')?.getAttribute('data-version') === '1.5'));
+ok('release 1.6 is a compact superscript beside the wordmark and exposed on the shell',await page.evaluate(()=>
+  document.querySelector('.brand-version')?.textContent==='1.6'&&
+  document.querySelector('.brand-version')?.getAttribute('aria-label')==='version 1.6'&&
+  document.querySelector('.shell')?.getAttribute('data-version')==='1.6'));
 const faviconBoot=await page.evaluate(()=>{
   const links=[...document.querySelectorAll('link[rel~="icon"]')],link=links[0],href=link?.getAttribute('href')||'';
   return {count:links.length,state:link?.dataset.state,href,svg:href.startsWith('data:image/svg+xml,')?decodeURIComponent(href.slice(href.indexOf(',')+1)):''};
@@ -157,10 +157,14 @@ console.log('\ndesign law');
 ok('only text outside terminals is the brand + folder names', stray.length === 0, stray.join(' | '));
 
 const brand = await page.locator('.rail-brand-meta .brand-name').textContent().catch(() => null);
-ok('the rail carries the product name above its utility footer', brand === 'ttydterm' && await page.evaluate(()=>{
+ok('the rail carries the product name above its utility footer',brand==='ttydterm'&&await page.evaluate(()=>{
   const brand=document.querySelector('.rail-brand-meta'),foot=document.querySelector('.rail-foot'),list=document.querySelector('.rail-list');
   return !!brand&&!!foot&&!!list&&brand.getBoundingClientRect().top>=list.getBoundingClientRect().top&&brand.getBoundingClientRect().bottom<=foot.getBoundingClientRect().top+1;
-}), String(brand));
+}),String(brand));
+ok('the bottom wordmark is centered in the sidebar',await page.evaluate(()=>{
+  const rail=document.querySelector('.rail'),brand=document.querySelector('.brand-block');if(!rail||!brand)return false;
+  const r=rail.getBoundingClientRect(),b=brand.getBoundingClientRect();return Math.abs((r.left+r.right-b.left-b.right)/2)<=1;
+}));
 ok('the collapse control shares the workspace icon column', await page.evaluate(() => {
   const badge=document.querySelector('.folder-badge'),toggle=document.querySelector('.rail-toggle');
   if(!badge||!toggle)return false;const b=badge.getBoundingClientRect(),t=toggle.getBoundingClientRect();
@@ -169,7 +173,7 @@ ok('the collapse control shares the workspace icon column', await page.evaluate(
 ok('the release uses a light superscript pill immediately after ttydterm',await page.evaluate(()=>{
   const name=document.querySelector('.brand-name'),badge=document.querySelector('.brand-version');if(!badge||!name)return false;
   const b=badge.getBoundingClientRect(),n=name.getBoundingClientRect(),style=getComputedStyle(badge);
-  return badge.textContent==='1.5'&&b.left>=n.right&&b.top<n.top+n.height/2&&b.height<n.height&&parseFloat(style.borderRadius)>=6&&style.boxShadow!=='none';
+  return badge.textContent==='1.6'&&b.left>=n.right&&b.top<n.top+n.height/2&&b.height<n.height&&parseFloat(style.borderRadius)>=6&&style.boxShadow!=='none';
 }));
 ok('workspace icons have no decorative line markers',await page.evaluate(()=>
   [...document.querySelectorAll('.folder-badge')].every((badge)=>getComputedStyle(badge,'::after').content==='none')));
@@ -260,6 +264,18 @@ ok('workspace activity buckets are capped and log-scaled',await page.evaluate(()
 }));
 ok('workspace font size resolves override before global and rejects unsupported values',await page.evaluate(()=>{
   const size=window.__workspaceFontSize;return size(undefined,13)===13&&size(16,13)===16&&size(15,13)===13;
+}));
+ok('pane exchange preserves split structure and swaps complete nested leaves',await page.evaluate(()=>{
+  const a={type:'pane',id:'a',command:'alpha',persist:true},b={type:'pane',id:'b',command:'beta',persist:false},c={type:'pane',id:'c',command:'gamma',persist:true};
+  const tree={type:'split',axis:'columns',sizes:[.4,.6],children:[a,{type:'split',axis:'rows',sizes:[.3,.7],children:[b,c]}]};
+  const next=window.__swapPanes(tree,'a','c'),sameSizes=next.sizes.join()===tree.sizes.join()&&next.children[1].sizes.join()===tree.children[1].sizes.join();
+  return next!==tree&&sameSizes&&next.axis==='columns'&&next.children[1].axis==='rows'&&next.children[0].id==='c'&&next.children[1].children[1].id==='a'&&
+    next.children[0].command==='gamma'&&window.__swapPanes(tree,'a','missing')===tree&&window.__swapPanes(tree,'a','a')===tree;
+}));
+ok('flat layout frames preserve pane gutters and nested divider ownership',await page.evaluate(()=>{
+  const p=(id)=>({type:'pane',id,command:id,persist:false}),tree={type:'split',axis:'columns',sizes:[.5,.5],children:[p('a'),{type:'split',axis:'rows',sizes:[.5,.5],children:[p('b'),p('c')]}]};
+  const result=window.__layoutFrames(tree,{x:0,y:0,w:1000,h:600},8),[a,b,c]=result.panes,outer=result.dividers.find((item)=>item.path.length===0),inner=result.dividers.find((item)=>item.path.join()==='1');
+  return result.panes.length===3&&result.dividers.length===2&&Math.abs(a.w-496)<.01&&Math.abs(b.x-504)<.01&&Math.abs(b.h-296)<.01&&Math.abs(c.y-304)<.01&&outer.available===992&&inner.available===592;
 }));
 const links = await page.locator('.surface:not([hidden]) a.term-link').count();
 ok('terminal URLs render as clickable links', links >= 2, String(links));
@@ -481,8 +497,11 @@ console.log('\nsplit');
 const firstPane = page.locator('.surface:not([hidden]) .pane').first();
 await firstPane.hover();
 
-const restingPicos = await firstPane.locator('.pico').count();
-ok('pane rests behind a single control', restingPicos === 1, String(restingPicos));
+const restingControls=await firstPane.locator(':scope > :is(.pane-grip,.rail-pane) > .pico').count();
+ok('multi-pane terminals expose one exchange handle and one menu control',restingControls===2,String(restingControls));
+ok('the top-left exchange handle leaves terminal text unobstructed',await firstPane.evaluate((pane)=>{
+  const grip=pane.querySelector('.pane-grip button')?.getBoundingClientRect(),term=pane.querySelector('.term'),content=(term.querySelector('.xterm-host')||term.querySelector('.term-body'))?.getBoundingClientRect();return !!grip&&!!content&&grip.bottom<=content.top;
+}));
 
 await firstPane.locator('.pico[aria-label="Pane menu"]').click();
 await page.waitForSelector('.panepop');
@@ -556,8 +575,12 @@ await page.screenshot({ path: `${SHOTS}/02-split-3-columns.png` });
 
 console.log('\nresize');
 const divider = page.locator('.surface:not([hidden]) .divider').first();
-const widthOfLeftNeighbour = () =>
-  divider.evaluate((el) => el.previousElementSibling.getBoundingClientRect().width);
+const widthOfLeftNeighbour=()=>divider.evaluate((element)=>{
+  const d=element.getBoundingClientRect(),panes=[...element.parentElement.querySelectorAll('.pane')]
+    .map((pane)=>pane.getBoundingClientRect()).filter((pane)=>pane.right<=d.left+.5&&Math.min(pane.bottom,d.bottom)-Math.max(pane.top,d.top)>20)
+    .sort((a,b)=>b.right-a.right);
+  return panes[0]?.width||0;
+});
 const before = await widthOfLeftNeighbour();
 const box = await divider.boundingBox();
 await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
@@ -576,8 +599,10 @@ ok('pane contents become resize placeholders during drag',
   (await page.locator('.surface:not([hidden]) .resize-placeholder').count()) === afterSplit);
 await page.mouse.up();
 await page.waitForTimeout(60);
-ok('terminal contents return after resize release',
-  (await page.locator('.surface:not([hidden]) .resize-placeholder').count()) === 0);
+ok('terminal contents return after resize release',(await page.locator('.surface:not([hidden]) .resize-placeholder').count())===0);
+const cancelDividerBox=await divider.boundingBox();await page.mouse.move(cancelDividerBox.x+cancelDividerBox.width/2,cancelDividerBox.y+cancelDividerBox.height/2);await page.mouse.down();await page.mouse.move(cancelDividerBox.x+30,cancelDividerBox.y+cancelDividerBox.height/2);
+await divider.evaluate((element)=>element.dispatchEvent(new PointerEvent('pointercancel',{pointerId:1,bubbles:true})));
+ok('divider pointer cancellation restores terminal contents',await page.evaluate(()=>!document.querySelector('.divider.dragging')&&!document.querySelector('.resize-placeholder')));await page.mouse.up();
 
 await divider.focus();
 ok('divider is focusable', await divider.evaluate((el) => el === document.activeElement));
@@ -590,8 +615,51 @@ const kbBefore = await widthOfLeftNeighbour();
 for (let i = 0; i < 5; i++) await page.keyboard.press('ArrowLeft');
 await page.waitForTimeout(150);
 const kbAfter = await widthOfLeftNeighbour();
-ok('arrow keys resize the divider', kbAfter < kbBefore - 40, `${Math.round(kbBefore)} -> ${Math.round(kbAfter)}`);
-await page.screenshot({ path: `${SHOTS}/03-after-resize.png` });
+ok('arrow keys resize the divider',kbAfter<kbBefore-40,`${Math.round(kbBefore)} -> ${Math.round(kbAfter)}`);
+await page.screenshot({path:`${SHOTS}/03-after-resize.png`});
+
+console.log('\npane exchange');
+ok('exchange handles appear only in workspaces with multiple panes',await page.evaluate(()=>{
+  const surfaces=[...document.querySelectorAll('.surface')];return surfaces.every((surface)=>{
+    const panes=surface.querySelectorAll('.pane').length,handles=surface.querySelectorAll('.pane-grip').length;return handles===(panes>1?panes:0);
+  });
+}));
+const exchangePanes=page.locator('.surface:not([hidden]) .pane'),exchangeSource=exchangePanes.first(),exchangeTarget=exchangePanes.last();
+const sourceId=await exchangeSource.getAttribute('data-pane-id'),targetId=await exchangeTarget.getAttribute('data-pane-id');
+const slotOf=(locator)=>locator.evaluate((pane)=>({x:parseFloat(pane.style.left),y:parseFloat(pane.style.top),w:parseFloat(pane.style.width),h:parseFloat(pane.style.height)}));
+const sourceBefore=await slotOf(exchangeSource),targetBefore=await slotOf(exchangeTarget),targetScreen=await exchangeTarget.boundingBox();
+await exchangeSource.evaluate((pane)=>pane.querySelector('.term').dataset.exchangeIdentity='source-kept');
+const sourceGrip=exchangeSource.locator('.pane-grip button');
+const gripBox=await sourceGrip.boundingBox();
+await page.mouse.move(gripBox.x+gripBox.width/2,gripBox.y+gripBox.height/2);await page.mouse.down();
+const exchangeViewport=page.viewportSize();
+await page.mouse.move(Math.min(targetScreen.x+targetScreen.width/2,exchangeViewport.width-20),Math.min(targetScreen.y+targetScreen.height/2,exchangeViewport.height-20),{steps:8});
+ok('pane exchange blanks every terminal without unmounting its content',await page.evaluate(({sourceId,count})=>
+  document.querySelectorAll('.surface:not([hidden]) .resize-placeholder').length===count&&document.querySelector(`[data-pane-id="${sourceId}"] .term`)?.dataset.exchangeIdentity==='source-kept',
+  {sourceId,count:afterSplit}));
+ok('pane exchange marks distinct source and destination panes',await page.evaluate(({sourceId,targetId})=>
+  document.querySelector(`[data-pane-id="${sourceId}"]`)?.classList.contains('exchange-source')&&
+  document.querySelector(`[data-pane-id="${targetId}"]`)?.classList.contains('exchange-target')&&
+  document.querySelectorAll('.pane-exchange-cue').length===2,{sourceId,targetId}));
+await page.screenshot({path:`${SHOTS}/21-pane-exchange.png`});
+await page.mouse.up();await page.waitForTimeout(100);
+const sourceAfter=await slotOf(page.locator(`[data-pane-id="${sourceId}"]`)),targetAfter=await slotOf(page.locator(`[data-pane-id="${targetId}"]`));
+ok('releasing exchanges complete panes across layout slots',sameBox(sourceAfter,targetBefore,1)&&sameBox(targetAfter,sourceBefore,1),JSON.stringify({sourceBefore,targetBefore,sourceAfter,targetAfter}));
+ok('pane exchange preserves mounted pane identity and persists the nested swap',await page.evaluate(({sourceId,targetId})=>{
+  const source=document.querySelector(`[data-pane-id="${sourceId}"]`),config=JSON.parse(localStorage.getItem('ttyd-workspace-v2')),folder=config.folders.find((item)=>item.id==='f-jr');
+  const ids=[];const walk=(node)=>node.type==='pane'?ids.push(node.id):node.children.forEach(walk);walk(folder.layout);
+  return source?.querySelector('.term')?.dataset.exchangeIdentity==='source-kept'&&ids.includes(sourceId)&&ids.includes(targetId)&&!document.querySelector('.resize-placeholder');
+},{sourceId,targetId}));
+const keyboardSource=page.locator(`[data-pane-id="${sourceId}"] .pane-grip button`);await keyboardSource.focus();await keyboardSource.press('Enter');
+await page.waitForSelector(`[data-pane-id="${sourceId}"].exchange-source`);await keyboardSource.press('ArrowLeft');
+await page.waitForFunction(()=>!!document.querySelector('.pane.exchange-target')&&document.querySelector('.surface:not([hidden]) .sr-live')?.textContent?.includes('selected'));
+ok('keyboard exchange selects a spatial target and announces it',true);
+await keyboardSource.press('Escape');
+ok('Escape cancels keyboard exchange and returns terminal contents',await page.evaluate(()=>!document.querySelector('.pane-exchange-cue')&&!document.querySelector('.resize-placeholder')));
+await keyboardSource.focus();await keyboardSource.press('Enter');await page.keyboard.press('Tab');await page.waitForFunction(()=>!document.querySelector('.pane-exchange-cue')&&!document.querySelector('.resize-placeholder'));
+ok('leaving the keyboard exchange handle cancels exchange mode',true);
+await keyboardSource.focus();await keyboardSource.press('Enter');await page.evaluate(()=>location.hash='#/f/f-infra');await page.waitForFunction(()=>document.querySelector('.folder.active .folder-name')?.textContent==='infra');await page.evaluate(()=>location.hash='#/f/f-jr');await page.waitForFunction(()=>document.querySelector('.folder.active .folder-name')?.textContent==='kalviumjr');
+ok('switching workspaces cancels keyboard exchange mode',await page.evaluate(()=>!document.querySelector('.pane-exchange-cue')&&!document.querySelector('.resize-placeholder')));
 
 console.log('\none gutter size everywhere');
 const gutters = await page.evaluate(() => {
@@ -675,19 +743,24 @@ await page.mouse.move(rzBox.x + rzBox.width / 2 + 90, rzBox.y + 200, { steps: 10
 await page.mouse.up();
 await page.waitForTimeout(150);
 const railAfter = await railW();
-ok('dragging widens the sidebar', railAfter > railBefore + 50, `${Math.round(railBefore)} -> ${Math.round(railAfter)}`);
+ok('dragging widens the sidebar',railAfter>railBefore+50,`${Math.round(railBefore)} -> ${Math.round(railAfter)}`);
+const railCancelBox=await rz.boundingBox();await page.mouse.move(railCancelBox.x+railCancelBox.width/2,railCancelBox.y+220);await page.mouse.down();await page.mouse.move(railCancelBox.x+30,railCancelBox.y+220);await rz.evaluate((element)=>element.dispatchEvent(new PointerEvent('pointercancel',{pointerId:1,bubbles:true})));
+ok('sidebar resize cancellation restores terminal contents',await page.evaluate(()=>!document.querySelector('.rail-gutter.dragging')&&!document.querySelector('.resize-placeholder')));await page.mouse.up();
 
 await rz.focus();
-ok('rail resizer exposes separator semantics', await rz.evaluate((el) =>
-  el.getAttribute('role') === 'separator' && el.hasAttribute('aria-valuenow') && el.hasAttribute('aria-label')));
-for (let i = 0; i < 4; i++) await page.keyboard.press('ArrowLeft');
+ok('rail resizer exposes separator semantics',await rz.evaluate((el)=>
+  el.getAttribute('role')==='separator'&&el.hasAttribute('aria-valuenow')&&el.hasAttribute('aria-label')));
+const railKeyboardBefore=await railW();
+for(let i=0;i<4;i++)await page.keyboard.press('ArrowLeft');
 await page.waitForTimeout(150);
-const railKb = await railW();
-ok('arrow keys resize the sidebar', railKb < railAfter - 40, `${Math.round(railAfter)} -> ${Math.round(railKb)}`);
+const railKb=await railW();
+ok('arrow keys resize the sidebar',railKb<railKeyboardBefore-40,`${Math.round(railKeyboardBefore)} -> ${Math.round(railKb)}`);
 
-ok('sidebar width persists into the config JSON', await page.evaluate(() => {
-  const c = JSON.parse(localStorage.getItem('ttyd-workspace-v2'));
-  return c && c.ui && Math.abs(c.ui.railWidth - document.querySelector('.rail').getBoundingClientRect().width) < 2;
+ok('sidebar width persists into the config JSON',await page.evaluate(()=>{
+  const c=JSON.parse(localStorage.getItem('ttyd-workspace-v2'));return c&&c.ui&&Math.abs(c.ui.railWidth-document.querySelector('.rail').getBoundingClientRect().width)<2;
+}));
+ok('the bottom wordmark remains centered after resizing the sidebar',await page.evaluate(()=>{
+  const rail=document.querySelector('.rail'),brand=document.querySelector('.brand-block'),r=rail?.getBoundingClientRect(),b=brand?.getBoundingClientRect();return !!r&&!!b&&Math.abs((r.left+r.right-b.left-b.right)/2)<=1;
 }));
 
 console.log('\ncollapsed rail: stable geometry');
@@ -847,6 +920,7 @@ const firstCompletion=await page.evaluate(()=>{
   const walk=(node)=>node.type==='pane'?panes.push(node):node.children.forEach(walk);walk(folder.layout);
   return {folderId:folder.id,paneId:panes[0].id,otherPaneId:panes[1].id};
 });
+await page.locator(`[data-pane-id="${firstCompletion.paneId}"]`).click();
 await page.evaluate(({folderId,paneId})=>
   window.__reportCommandCompletion({folderId,paneId,exitStatus:0,duration:6000}),firstCompletion);
 await page.evaluate(({folderId,otherPaneId})=>
@@ -1104,11 +1178,21 @@ ok('Escape discards an uncommitted command draft',await page.evaluate((paneId)=>
 
 console.log('\nworkspace icon + ordering');
 const orderBefore=await page.$$eval('.folder-name',(items)=>items.map((item)=>item.textContent));
-await page.locator('.folder-badge').first().dragTo(page.locator('.folder-badge').nth(2));
-await page.waitForTimeout(120);
+const workspaceSource=page.locator('.folder-badge').first(),workspaceDestination=page.locator('.folder').nth(2),sourceBox=await workspaceSource.boundingBox(),destinationBox=await workspaceDestination.boundingBox();
+const savedBeforeWorkspaceDrag=await page.evaluate(()=>localStorage.getItem('ttyd-workspace-v2'));
+await page.mouse.move(sourceBox.x+sourceBox.width/2,sourceBox.y+sourceBox.height/2);await page.mouse.down();
+await page.mouse.move(destinationBox.x+destinationBox.width/2,destinationBox.y+destinationBox.height*.75,{steps:10});
+const previewOrder=await page.evaluate(()=>[...document.querySelectorAll('.folder')].sort((a,b)=>a.getBoundingClientRect().top-b.getBoundingClientRect().top).map((row)=>row.querySelector('.folder-name')?.textContent));
+ok('workspace rows move live before pointer release without overlap or an insertion line',previewOrder.join('|')===orderBefore.slice(1).concat(orderBefore[0]).join('|')&&await page.evaluate((saved)=>{
+  const tops=[...document.querySelectorAll('.folder')].map((row)=>Math.round(row.getBoundingClientRect().top));return localStorage.getItem('ttyd-workspace-v2')===saved&&!document.querySelector('.folder.drop-target')&&new Set(tops).size===tops.length&&[...document.querySelectorAll('.folder')].every((row)=>getComputedStyle(row,'::after').content==='none');
+},savedBeforeWorkspaceDrag));
+await page.mouse.up();await page.waitForTimeout(120);
 const orderAfter=await page.$$eval('.folder-name',(items)=>items.map((item)=>item.textContent));
-ok('dragging a workspace icon reorders and persists workspaces',orderAfter.join('|')===orderBefore.slice(1).concat(orderBefore[0]).join('|')&&await page.evaluate((order)=>
-  JSON.parse(localStorage.getItem('ttyd-workspace-v2')).folders.map((folder)=>folder.name).join('|')===order.join('|'),orderAfter));
+ok('releasing a workspace drag persists its live order without activation',orderAfter.join('|')===orderBefore.slice(1).concat(orderBefore[0]).join('|')&&await page.evaluate((order)=>
+  JSON.parse(localStorage.getItem('ttyd-workspace-v2')).folders.map((folder)=>folder.name).join('|')===order.join('|')&&document.querySelector('.folder.active .folder-name')?.textContent==='kalviumjr',orderAfter));
+const cancelSource=page.locator('.folder-badge').first(),cancelTarget=page.locator('.folder').nth(1),cancelSourceBox=await cancelSource.boundingBox(),cancelTargetBox=await cancelTarget.boundingBox(),savedBeforeCancel=await page.evaluate(()=>localStorage.getItem('ttyd-workspace-v2'));
+await page.mouse.move(cancelSourceBox.x+cancelSourceBox.width/2,cancelSourceBox.y+cancelSourceBox.height/2);await page.mouse.down();await page.mouse.move(cancelTargetBox.x+cancelTargetBox.width/2,cancelTargetBox.y+cancelTargetBox.height*.8,{steps:7});await page.keyboard.press('Escape');await page.mouse.up();
+ok('Escape cancels live workspace ordering and suppresses its trailing click',await page.evaluate((saved)=>localStorage.getItem('ttyd-workspace-v2')===saved&&!document.querySelector('.rail-list.reordering')&&document.querySelector('.folder.active .folder-name')?.textContent==='kalviumjr',savedBeforeCancel));
 await page.locator('.folder').nth(2).click({button:'right'});
 await page.getByRole('menuitem',{name:'Move up'}).click();
 await page.locator('.folder').nth(1).click({button:'right'});
@@ -1446,13 +1530,11 @@ ok('every documentation page has a distinct background pattern',
 
 const readmePanes=demo.locator('.surface:not([hidden]) .pane');
 ok('README demonstrates one left pane plus a stacked right pair',
-  await readmePanes.count() === 3 && await demo.evaluate(() => {
-    const surface=document.querySelector('.surface:not([hidden])'),outer=surface?.querySelector('.canvas > .split.columns');
-    if(!outer)return false;const slots=[...outer.children].filter((node)=>node.classList?.contains('slot'));
-    const nested=slots[1]?.querySelector(':scope > .split.rows');if(!nested)return false;
-    const rows=[...nested.children].filter((node)=>node.classList?.contains('slot'));
-    const widths=slots.map((node)=>node.getBoundingClientRect().width),heights=rows.map((node)=>node.getBoundingClientRect().height);
-    return slots.length===2&&rows.length===2&&Math.abs(widths[0]-widths[1])<=2&&Math.abs(heights[0]-heights[1])<=2;
+  await readmePanes.count()===3&&await demo.evaluate(()=>{
+    const panes=[...document.querySelectorAll('.surface:not([hidden]) .pane')].map((pane)=>pane.getBoundingClientRect()).sort((a,b)=>a.left-b.left||a.top-b.top);
+    const [left,topRight,bottomRight]=panes;
+    return left&&topRight&&bottomRight&&left.left<topRight.left&&Math.abs(topRight.left-bottomRight.left)<=2&&
+      Math.abs(left.width-topRight.width)<=2&&Math.abs(topRight.height-bottomRight.height)<=2&&topRight.bottom<bottomRight.top;
   }));
 const readmeCommands=await readmePanes.evaluateAll((panes)=>panes.map((pane)=>
   pane.querySelector('.term-body > .term-row')?.textContent?.trim()));
@@ -1636,6 +1718,18 @@ ok('untrusted restore regenerates duplicate and object-prototype ids',await dupl
   return new Set(folderIds).size===3&&new Set(paneIds).size===3&&folderIds.every(safe)&&paneIds.every(safe)&&document.querySelectorAll('.folder').length===3;
 }));
 await duplicateContext.close();
+const manyContext=await browser.newContext({viewport:{width:1000,height:520}});
+await manyContext.addInitScript(()=>localStorage.setItem('ttyd-workspace-v2',JSON.stringify({version:8,ui:{railWidth:176,railOpen:true,fontSize:13,fontWeight:'regular',notifyOnCommandFinish:false,useTmux:false},folders:Array.from({length:30},(_,index)=>({
+  id:'many-'+index,name:'workspace-'+index,cwd:'~',theme:'paper',icon:null,pattern:'plain',layout:null,
+}))})));
+const manyPage=await manyContext.newPage();await manyPage.goto(BASE,{waitUntil:'networkidle'});await manyPage.waitForSelector('.folder:nth-child(30)');
+ok('long workspace lists retain full-size reorder targets and scroll',await manyPage.evaluate(()=>{
+  const list=document.querySelector('.rail-list'),rows=[...document.querySelectorAll('.folder')];return rows.length===30&&rows.every((row)=>row.getBoundingClientRect().height>=36)&&list.scrollHeight>list.clientHeight;
+}));
+const manyBadge=manyPage.locator('.folder-badge').first(),manyList=manyPage.locator('.rail-list'),manyBadgeBox=await manyBadge.boundingBox(),manyListBox=await manyList.boundingBox();
+await manyPage.mouse.move(manyBadgeBox.x+manyBadgeBox.width/2,manyBadgeBox.y+manyBadgeBox.height/2);await manyPage.mouse.down();await manyPage.mouse.move(manyBadgeBox.x+manyBadgeBox.width/2,manyListBox.y+manyListBox.height-3,{steps:8});await manyPage.waitForTimeout(180);
+ok('workspace dragging auto-scrolls a long list near its edge',await manyPage.evaluate(()=>document.querySelector('.rail-list').scrollTop>0));
+await manyPage.mouse.up();await manyContext.close();
 await demoContext.close();
 
 const fileContext=await browser.newContext();
@@ -1855,6 +1949,40 @@ ok('Escape discards a real pane draft without opening a socket or changing saved
 },{count:socketsBeforeDiscard}));
 await lifecycleContext.close();
 
+const exchangeLifecycleContext=await browser.newContext({viewport:{width:1200,height:760}});
+await exchangeLifecycleContext.addInitScript((config)=>{
+  localStorage.setItem('ttyd-workspace-v2',JSON.stringify(config));window.__exchangeSockets=[];
+  const frame=(command,text)=>{const data=new TextEncoder().encode(text),out=new Uint8Array(data.length+1);out[0]=command.charCodeAt(0);out.set(data,1);return out.buffer};
+  class FakeWebSocket{
+    constructor(){this.readyState=0;this.sent=[];this.closed=false;window.__exchangeSockets.push(this);queueMicrotask(()=>{this.readyState=1;this.onopen?.({})})}
+    send(value){const text=new TextDecoder().decode(value);this.sent.push(text);if(text.startsWith('{'))queueMicrotask(()=>this.onmessage?.({data:frame('0','shell ready\r\n')}));const marker=text.match(/__TTYDTERM_PROBE_[a-z0-9]+__/i)?.[0];if(marker)queueMicrotask(()=>this.onmessage?.({data:frame('0','\0'+marker+'\0/home/test\0/work\0/bin/bash\0'+'0\0'+marker+'\0')}))}
+    close(){this.closed=true;this.readyState=3}
+  }
+  Object.defineProperty(window,'WebSocket',{value:FakeWebSocket,configurable:true});
+},{version:8,ui:{railWidth:176,railOpen:true,fontSize:13,fontWeight:'regular',notifyOnCommandFinish:false,useTmux:false},folders:[{
+  id:'exchange-real',name:'exchange-real',cwd:'~',theme:'night',icon:null,pattern:'plain',layout:{type:'split',axis:'columns',sizes:[.45,.55],children:[
+    {type:'pane',id:'real-a',command:'echo real-a',persist:false},{type:'split',axis:'rows',sizes:[.5,.5],children:[
+      {type:'pane',id:'real-b',command:'echo real-b',persist:false},{type:'pane',id:'real-c',command:'echo real-c',persist:false},
+    ]},
+  ]},
+},{id:'exchange-hidden',name:'exchange-hidden',cwd:'~',theme:'ocean',icon:null,pattern:'plain',layout:{type:'pane',id:'real-d',command:'echo real-d',persist:false}}]});
+const exchangeLifecyclePage=await exchangeLifecycleContext.newPage();
+await exchangeLifecyclePage.route('**/token',(route)=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({token:'test-token'})}));
+await exchangeLifecyclePage.goto(RAW_BASE,{waitUntil:'domcontentloaded'});await exchangeLifecyclePage.waitForFunction(()=>document.querySelectorAll('.connection-ready').length===4);
+const exchangeSocketBaseline=await exchangeLifecyclePage.evaluate(()=>({count:window.__exchangeSockets.length,terminals:window.__exchangeSockets.filter((socket)=>socket.sent.some((text)=>text.includes('real-')))}));
+const realASource=exchangeLifecyclePage.locator('[data-pane-id="real-a"]'),realCTarget=exchangeLifecyclePage.locator('[data-pane-id="real-c"]'),realGrip=realASource.locator('.pane-grip button'),realGripBox=await realGrip.boundingBox(),realTargetBox=await realCTarget.boundingBox();
+await exchangeLifecyclePage.mouse.move(realGripBox.x+realGripBox.width/2,realGripBox.y+realGripBox.height/2);await exchangeLifecyclePage.mouse.down();await exchangeLifecyclePage.mouse.move(realTargetBox.x+realTargetBox.width/2,realTargetBox.y+realTargetBox.height/2,{steps:8});
+ok('real pane exchange suspends visuals without closing terminal sockets',await exchangeLifecyclePage.evaluate(()=>document.querySelectorAll('.surface:not([hidden]) .xterm-suspended').length===3&&window.__exchangeSockets.filter((socket)=>socket.sent.some((text)=>text.includes('real-'))).every((socket)=>!socket.closed)));
+await exchangeLifecyclePage.mouse.up();await exchangeLifecyclePage.waitForTimeout(80);
+ok('real pane exchange keeps every WebSocket and xterm DOM instance alive',await exchangeLifecyclePage.evaluate(({count})=>{
+  const terminalSockets=window.__exchangeSockets.filter((socket)=>socket.sent.some((text)=>text.includes('real-')));return window.__exchangeSockets.length===count&&terminalSockets.length===4&&terminalSockets.every((socket)=>!socket.closed)&&document.querySelectorAll('.xterm-term').length===4&&!document.querySelector('.term.skeleton');
+},exchangeSocketBaseline));
+await exchangeLifecyclePage.locator('.surface').first().evaluate((surface)=>surface.dataset.workspaceIdentity='kept');
+const reorderSocketCount=await exchangeLifecyclePage.evaluate(()=>window.__exchangeSockets.length),realRows=exchangeLifecyclePage.locator('.folder'),realSource=realRows.first().locator('.folder-badge'),realDestination=realRows.nth(1),realSourceBox=await realSource.boundingBox(),realDestinationBox=await realDestination.boundingBox();
+await exchangeLifecyclePage.mouse.move(realSourceBox.x+realSourceBox.width/2,realSourceBox.y+realSourceBox.height/2);await exchangeLifecyclePage.mouse.down();await exchangeLifecyclePage.mouse.move(realDestinationBox.x+realDestinationBox.width/2,realDestinationBox.y+realDestinationBox.height*.8,{steps:8});await exchangeLifecyclePage.mouse.up();await exchangeLifecyclePage.waitForTimeout(60);
+ok('live workspace ordering preserves every mounted terminal socket and surface',await exchangeLifecyclePage.evaluate((count)=>window.__exchangeSockets.length===count&&window.__exchangeSockets.filter((socket)=>socket.sent.some((text)=>text.includes('real-'))).every((socket)=>!socket.closed)&&document.querySelector('.surface[data-workspace-identity="kept"]'),reorderSocketCount));
+await exchangeLifecycleContext.close();
+
 const deniedContext=await browser.newContext();
 await deniedContext.addInitScript(()=>{
   class DeniedNotification { static permission='denied'; static requestPermission=async()=>{ throw new Error('must not prompt after denial') } }
@@ -1881,7 +2009,9 @@ const rmAnim = await rmPage.locator('.surface:not([hidden]) .pane').first()
 ok('reduced motion disables pane entrance animation', rmAnim === 'none', rmAnim);
 const reducedActivity=await rmPage.locator('.folder').first().evaluate((row)=>{const layer=document.createElement('span');layer.className='folder-activity';row.append(layer);const name=getComputedStyle(layer).animationName;layer.remove();return name});
 ok('reduced motion keeps workspace activity static',reducedActivity==='none',reducedActivity);
-await rmPage.close();
+const reducedExchange=rmPage.locator('.surface:not([hidden]) .pane-grip button').first();await reducedExchange.focus();await reducedExchange.press('Enter');await reducedExchange.press('ArrowRight');
+ok('reduced motion keeps pane exchange cues static',await rmPage.evaluate(()=>[...document.querySelectorAll('.pane-exchange-cue')].every((cue)=>getComputedStyle(cue).animationName==='none')));
+await reducedExchange.press('Escape');await rmPage.close();
 
 console.log('\nerrors seen: ' + (errors.length ? errors.join(' | ') : 'none'));
 await browser.close();

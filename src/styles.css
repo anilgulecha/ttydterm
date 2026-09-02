@@ -85,10 +85,10 @@
   .brand-mark svg { width: 17px; height: 17px; }
 
   .brand-block {
-    flex:1;min-width:0;height:30px;padding:0 12px;
-    display:flex;align-items:center;gap:3px;
+    flex:0 1 auto;min-width:0;height:30px;padding:0 12px;
+    display:flex;align-items:center;justify-content:center;gap:3px;
   }
-  .rail-brand-meta { flex:0 0 auto;min-width:0;padding-top:4px; }
+  .rail-brand-meta { flex:0 0 auto;min-width:0;padding-top:4px;display:flex;justify-content:center; }
   .rail.collapsed .rail-brand-meta { display:none; }
   .brand-name {
     min-width:0;
@@ -125,9 +125,11 @@
     padding: 8px 0;
     display: flex; flex-direction: column; gap: 2px;
   }
+  .rail-list.reordering { overflow-y: hidden; }
 
   .folder {
     position: relative;
+    flex: 0 0 auto;
     display: flex; align-items: center;
     width: 100%; height: 36px;
     padding: 0; margin: 0;
@@ -176,10 +178,16 @@
     color: inherit;
   }
   .folder-badge svg { width: 19px; height: 19px; }
-  .folder-badge[draggable="true"] { cursor:grab; }
-  .folder-badge[draggable="true"]:active { cursor:grabbing; }
-  .folder.dragging { opacity:.55; }
-  .folder.drop-target::after { content:"";position:absolute;z-index:5;left:8px;right:8px;bottom:0;height:2px;border-radius:2px;background:var(--ui-accent);pointer-events:none; }
+  .folder-badge { cursor:grab; touch-action:none; }
+  .folder-badge:active { cursor:grabbing; }
+  /* Rows swap live under the pointer, so no insertion line is drawn. */
+  .folder.dragging {
+    z-index:20; opacity:.92; cursor:grabbing;
+    background:var(--ui-hover); box-shadow:0 8px 20px var(--ui-shadow);
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .rail-list.reordering .folder:not(.dragging) { transition:transform .16s ease; }
+  }
 
   .folder-name { flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
   .folder-complete {
@@ -272,23 +280,17 @@
   .viewport { position: absolute; inset: 0; overflow: auto; }
   .canvas { position: relative; }
 
-  .split { display: flex; position: absolute; inset: 0; }
-  .split.columns { flex-direction: row; }
-  .split.rows { flex-direction: column; }
-  .slot { position: relative; flex: 0 0 auto; min-width: 0; min-height: 0; }
-
-
-  .divider { flex: 0 0 auto; position: relative; z-index: 3; }
-  .columns > .divider { width: var(--gap); cursor: col-resize; }
-  .rows > .divider { height: var(--gap); cursor: row-resize; }
+  .divider { position: absolute; z-index: 3; }
+  .divider.columns { cursor: col-resize; }
+  .divider.rows { cursor: row-resize; }
   .divider::after {
     content: ""; position: absolute;
     background: color-mix(in srgb,var(--stage-accent) 72%,var(--stage-bg));
     border-radius: 2px; opacity:0;
     transition: opacity 200ms ease;
   }
-  .columns > .divider::after { top: var(--radius); bottom: var(--radius); left: 3px; width: 2px; }
-  .rows > .divider::after { left: var(--radius); right: var(--radius); top: 3px; height: 2px; }
+  .divider.columns::after { top: var(--radius); bottom: var(--radius); left: 3px; width: 2px; }
+  .divider.rows::after { left: var(--radius); right: var(--radius); top: 3px; height: 2px; }
   .divider:hover::after, .divider.dragging::after { opacity:1; }
   .divider:focus-visible { outline: none; }
   .divider:focus-visible::after { opacity:1;box-shadow: 0 0 0 2px color-mix(in srgb, var(--stage-accent) 45%, transparent); }
@@ -296,7 +298,7 @@
 
 
   .pane {
-    position: absolute; inset: 0;
+    position: absolute;
     border-radius: var(--radius);
     overflow: hidden;
     outline: none;
@@ -312,14 +314,19 @@
   }
   .pane.focused .pane-edge { box-shadow: inset 0 0 0 2px var(--t-ring); }
   .pane-complete {
-    position:absolute;z-index:10;top:8px;left:8px;width:8px;height:8px;border-radius:50%;
+    position:absolute;z-index:10;top:14px;left:37px;width:8px;height:8px;border-radius:50%;
     pointer-events:none;background:var(--t-yellow);box-shadow:0 0 0 2px var(--t-bg);
+  }
+
+  .sr-live {
+    position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;
+    clip-path:inset(50%);white-space:nowrap;border:0;
   }
   @media (prefers-reduced-motion: reduce) { .pane-edge { transition: none; } }
 
   .term {
-    position: absolute; inset: 0;
-    padding: 10px 12px;
+    position:absolute;inset:0;
+    padding:36px 12px 10px;
     overflow: hidden;
     font-family: var(--mono);
     font-size: 12.5px;
@@ -332,7 +339,7 @@
   .term-row { display: block; }
   .xterm-term { padding:0; }
   .xterm-term::before { z-index:0; }
-  .xterm-host { position:absolute;inset:7px 8px;z-index:1; }
+  .xterm-host { position:absolute;inset:35px 8px 7px;z-index:1; }
   .xterm-term .xterm, .xterm-term .xterm-viewport, .xterm-term .xterm-screen { background:transparent !important; }
 
   .tmux-terminal .xterm-viewport { overflow-y:hidden !important; scrollbar-width:none; }
@@ -451,13 +458,40 @@
   }
 
 
-  .term.skeleton { display: flex; flex-direction: column; gap: 9px; padding-top: 13px; }
+  .term.skeleton { display:flex;flex-direction:column;gap:9px;padding-top:36px; }
   .sk-line { height: 8px; border-radius: 4px; background: var(--t-skel); }
   .sk-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 9px; }
   .term-body { animation: term-in .22s ease-out both; }
 
 
   .pane-hotspot { position:absolute; top:0; right:0; width:54px; height:54px; z-index:3; }
+  .pane-grip { position:absolute;top:7px;left:7px;z-index:12;pointer-events:none; }
+  .pane-grip > .pico {
+    opacity:0;pointer-events:none;cursor:grab;transition:opacity .12s;
+    background:var(--t-bg); box-shadow:0 0 0 1px var(--t-edge);
+  }
+  .pane:hover .pane-grip, .pane-grip.open, .pane-grip:focus-within { pointer-events:auto; }
+  .pane:hover .pane-grip > .pico, .pane-grip:hover > .pico,
+  .pane-grip.open > .pico, .pane-grip:focus-within > .pico { opacity:1;pointer-events:auto; }
+  .pane-grip > .pico:active { cursor:grabbing; }
+  @media (prefers-reduced-motion: reduce) { .pane-grip > .pico { transition:none; } }
+
+  /* Exchange cues never change pane geometry: they paint inside the pane. */
+  .pane-exchange-cue { position:absolute;inset:0;z-index:8;pointer-events:none;border-radius:var(--radius); }
+  .pane-exchange-cue.source {
+    outline:3px dashed var(--t-magenta);outline-offset:-6px;
+    background:color-mix(in srgb,var(--t-magenta) 12%,transparent);
+  }
+  .pane-exchange-cue.target {
+    outline:3px double var(--t-magenta);outline-offset:-3px;
+    background:color-mix(in srgb,var(--t-magenta) 19%,transparent);
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .pane-exchange-cue.source { animation:exchange-source 1.1s ease-in-out infinite alternate; }
+    .pane-exchange-cue.target { animation:exchange-target .7s ease-in-out infinite alternate; }
+  }
+  @keyframes exchange-source { to { outline-offset:-10px; } }
+  @keyframes exchange-target { to { outline-offset:-7px; } }
   .rail-pane {
     position: absolute; top: 7px; right: 7px; z-index: 4;
     pointer-events:auto;

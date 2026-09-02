@@ -87,4 +87,6 @@ interface Window {
   __primarySelectionHint?: string;
   __workspaceFontSize?: (folderFontSize:number|undefined, globalFontSize:number) => number;
   __reportCommandCompletion?: (event: { folderId:string; paneId:string; exitStatus:number; duration:number }) => void;
+  __swapPanes?: (node:import('../types').LayoutNode|null,a:string,b:string)=>import('../types').LayoutNode|null;
+  __layoutFrames?: typeof import('../layout').layoutFrames;
 }

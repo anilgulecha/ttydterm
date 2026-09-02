@@ -4,17 +4,20 @@ import { paneLaunchCommand, shellCwd, shellQuote, tmuxLaunchCommand, ttydLaunchC
 import { DOC_PAGES, docPage } from './docs';
 import { updateFavicon } from './favicon';
 import { CountGlyph, Ico, WS_ICONS, WS_ICON_KEYS, WsIcon } from './icons';
-import { countPanes, equal, findPane, listPanes, mapTree, nodeMin, normalize, pane, removePane, splitPane, uid } from './layout';
+import { countPanes, equal, findPane, layoutFrames, listPanes, mapTree, neighborPane, nodeMin, normalize, pane, removePane, splitPane, swapPanes, uid } from './layout';
+import type { Direction, Frame } from './layout';
 import type { DocBlock, DocPage, DocSection, DocSpan } from './docs';
 import { Button, CheckboxField, Field, FieldGroup, ModalActions, ModalForm, ModalShell } from './modal';
 import type {
   Capabilities, Config, Folder, FontWeight, LayoutNode, PaneNode, PatternName, Runtime,
-  SplitAxis, Theme, TmuxState, TtydEndpoints, UiState, ValidationResult,
+  SplitAxis, SplitNode, Theme, TmuxState, TtydEndpoints, UiState, ValidationResult,
 } from './types';
 import { chromeVars, contrastAudit, paneGridIndex, seededPane, sidebarAtmosphereVars, softHorizonBackground, THEME_KEYS, THEMES, themeOf, themeVars } from './themes';
 import { APP_VERSION } from './version';
 
-window.__contrastAudit = contrastAudit;
+window.__contrastAudit=contrastAudit;
+window.__swapPanes=swapPanes;
+window.__layoutFrames=layoutFrames;
 window.__terminalAtmosphere = { seededPane, softHorizonBackground, paneGridIndex, sidebarAtmosphereVars };
 
 const STORE_KEY = 'ttyd-workspace-v2';
@@ -596,7 +599,9 @@ function Terminal({ folder, pane, runtime, active, suspended, titleOwner, useTmu
   const page = folder.doc ? docPage(folder.doc) : null;
   const section = page ? page.sections[pane.docSection ?? 0] : null;
 
-  if (page && section) return <DocTerminal folder={folder} page={page} section={section} />;
+  if(page&&section)return suspended
+    ? <div className={'term resize-placeholder pattern-'+(folder.pattern||'plain')} aria-label="Terminal paused during layout change"/>
+    : <DocTerminal folder={folder} page={page} section={section}/>;
   if (!folder.doc&&runtime.mode==='ttyd'&&useTmux===null)return <div className={'term pattern-'+(folder.pattern||'plain')} aria-label="Terminal waiting for tmux check"><div className="connection-state">Checking for tmux…</div></div>;
   if (!folder.doc && runtime.mode === 'ttyd'&&useTmux!==null) return <RealTerminal folder={folder} pane={pane} runtime={runtime} active={active} suspended={suspended} titleOwner={titleOwner} useTmux={useTmux} onCommandComplete={onCommandComplete} onOutputActivity={onOutputActivity}/>;
   return <MockTerminal folder={folder} pane={pane} suspended={suspended}/>;
@@ -628,7 +633,9 @@ type PaneMenu = { source: 'trigger' | 'context'; x: number; y: number };
 interface FocusRequest { id: string; n?: number; nonce?: number }
 
 const Pane=React.memo(function Pane({ node, folder, runtime, active, focused, completed, closing, focusReq, resizing, useTmux,
-               onFocus, onSplit, onClose, canClose, onOpenSettings, onOpenWorkspaceSettings, onCommandComplete, onOutputActivity }: {
+               frame, exchangeRole, exchangeActive, canExchange, position, paneCount,
+               onFocus, onSplit, onClose, canClose, onOpenSettings, onOpenWorkspaceSettings, onCommandComplete, onOutputActivity,
+               onExchangePointer, onExchangeKey }: {
   node: PaneNode;
   folder: Folder;
   runtime: Runtime;
@@ -639,6 +646,12 @@ const Pane=React.memo(function Pane({ node, folder, runtime, active, focused, co
   focusReq: FocusRequest | null;
   resizing: boolean;
   useTmux: boolean|null;
+  frame: Frame;
+  exchangeRole: 'source' | 'target' | null;
+  exchangeActive: boolean;
+  canExchange: boolean;
+  position: number;
+  paneCount: number;
   onFocus: (folderId:string,paneId:string) => void;
   onSplit: (folderId:string,paneId:string,axis:SplitAxis,count:number) => void;
   onClose: (paneId: string) => void;
@@ -647,6 +660,8 @@ const Pane=React.memo(function Pane({ node, folder, runtime, active, focused, co
   onOpenWorkspaceSettings: (folderId:string) => void;
   onCommandComplete: (event:CommandCompletion) => void;
   onOutputActivity: (folderId:string, bytes:number) => void;
+  onExchangePointer: (paneId:string, event:React.PointerEvent<HTMLButtonElement>) => void;
+  onExchangeKey: (paneId:string, event:React.KeyboardEvent<HTMLButtonElement>) => void;
 }) {
   const [menu, setMenu] = useState<PaneMenu | null>(null);
   const ref = useRef<HTMLDivElement | null>(null),menuRef=useRef<HTMLDivElement|null>(null);
@@ -691,8 +706,10 @@ const Pane=React.memo(function Pane({ node, folder, runtime, active, focused, co
   return (
     <div
       ref={ref}
-      className={'pane' + (focused ? ' focused' : '') + (closing ? ' closing' : '')}
-      style={{ ...themeVars(accent), '--t-ring': accent.blue }}
+      className={'pane' + (focused ? ' focused' : '') + (closing ? ' closing' : '')
+        + (exchangeRole ? ' exchange-' + exchangeRole : '') + (exchangeActive ? ' exchanging' : '')}
+      style={{ ...themeVars(accent), '--t-ring': accent.blue,
+        left: frame.x + 'px', top: frame.y + 'px', width: frame.w + 'px', height: frame.h + 'px' }}
       data-pane-id={node.id}
       aria-label={'Terminal' + (completed ? ', ' + completed + ' completed command' + (completed === 1 ? '' : 's') + ' needing attention' : '')}
       tabIndex={-1}
@@ -719,6 +736,19 @@ const Pane=React.memo(function Pane({ node, folder, runtime, active, focused, co
 
       {}
       <div className="pane-edge" aria-hidden="true" />
+      {exchangeRole ? <div className={'pane-exchange-cue ' + exchangeRole} aria-hidden="true" /> : null}
+
+      {}
+      {canExchange ? (
+        <div className={'pane-grip'+(exchangeActive?' open':'')} onPointerDown={(e)=>e.stopPropagation()}>
+          <button className="pico" type="button"
+                  title="Exchange this terminal with another pane"
+                  aria-label={'Exchange terminal ' + position + ' of ' + paneCount + ', drag or press Enter then use arrow keys'}
+                  aria-pressed={exchangeRole === 'source'}
+                  onPointerDown={(event) => onExchangePointer(node.id, event)}
+                  onKeyDown={(event) => onExchangeKey(node.id, event)}><Ico.grip /></button>
+        </div>
+      ) : null}
 
       {}
       <div className={'pane-hotspot' + (menu ? ' open' : '')} aria-hidden="true" />
@@ -771,133 +801,37 @@ const Pane=React.memo(function Pane({ node, folder, runtime, active, focused, co
   );
 });
 
-interface NodeProps {
-  node: LayoutNode;
-  folder: Folder;
-  runtime: Runtime;
-  active: boolean;
-  focusId: string | null;
-  closingId: string | null;
-  focusReq: FocusRequest | null;
-  completedByPane: Record<string,number>;
-  resizing: boolean;
-  useTmux: boolean|null;
-  onResizeStart: () => void;
-  onResizeEnd: () => void;
-  onFocus: (folderId:string,paneId:string) => void;
-  onSplit: (folderId:string,paneId:string,axis:SplitAxis,count:number) => void;
-  onClose: (paneId: string) => void;
-  canClose: boolean;
-  onResize: (folderId:string,path:number[],sizes:number[]) => void;
-  onOpenSettings: (folderId:string,paneId:string) => void;
-  onOpenWorkspaceSettings: (folderId:string) => void;
-  onCommandComplete: (event:CommandCompletion) => void;
-  onOutputActivity: (folderId:string, bytes:number) => void;
-  path: number[];
-}
-
-function Node({ node, folder, runtime, active, focusId, closingId, focusReq, completedByPane, resizing, useTmux, onResizeStart, onResizeEnd,
-               onFocus, onSplit, onClose, canClose, onResize, onOpenSettings, onOpenWorkspaceSettings, onCommandComplete, onOutputActivity, path }: NodeProps) {
-  const ref = useRef<HTMLDivElement | null>(null);
-
-  if (node.type === 'pane') {
-    const leaf = node;
-    return (
-      <Pane node={leaf} folder={folder} runtime={runtime} active={active} focused={focusId === leaf.id} completed={completedByPane[leaf.id] || 0} closing={closingId === leaf.id}
-            focusReq={focusReq?.id===leaf.id?focusReq:null} resizing={resizing} useTmux={useTmux}
-            onFocus={onFocus} onSplit={onSplit} onClose={onClose} canClose={canClose}
-            onOpenSettings={onOpenSettings} onOpenWorkspaceSettings={onOpenWorkspaceSettings} onCommandComplete={onCommandComplete} onOutputActivity={onOutputActivity} />
-    );
+/* Resolve the split node a divider path points at, so resize math stays with
+   the tree while rendering stays flat. */
+function splitAt(root: LayoutNode | null, path: number[]): SplitNode | null {
+  let node: LayoutNode | null = root;
+  for (const index of path) {
+    if (!node || node.type !== 'split') return null;
+    node = node.children[index] ?? null;
   }
-
-  const kidMins = node.children.map((child)=>nodeMin(child,GAP));
-  const gaps = (node.children.length - 1) * GAP;
-
-
-  const clampDelta = (i: number, delta: number, avail: number) => {
-    const a0 = node.sizes[i], b0 = node.sizes[i + 1];
-    const minA = (node.axis === 'columns' ? kidMins[i].w : kidMins[i].h) / avail;
-    const minB = (node.axis === 'columns' ? kidMins[i + 1].w : kidMins[i + 1].h) / avail;
-    let lo = minA - a0, hi = b0 - minB;
-    if (hi - lo < 0.01) { lo = FLOOR - a0; hi = b0 - FLOOR; }
-    const d = Math.max(Math.min(delta, hi), lo);
-    const next = node.sizes.slice();
-    next[i] = a0 + d; next[i + 1] = b0 - d;
-    return next;
-  };
-
-  const availOf = () => {
-    const box = ref.current?.getBoundingClientRect();
-    if (!box) return 0;
-    return (node.axis === 'columns' ? box.width : box.height) - gaps;
-  };
-
-  const startDrag = (i: number) => (e: React.PointerEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    const avail = availOf();
-    if (avail <= 0) return;
-    const startPos = node.axis === 'columns' ? e.clientX : e.clientY;
-    const target = e.currentTarget;
-    target.focus();
-    target.classList.add('dragging');
-    target.setPointerCapture(e.pointerId);
-    onResizeStart();
-
-    const move = (ev: PointerEvent) => {
-      const delta = ((node.axis === 'columns' ? ev.clientX : ev.clientY) - startPos) / avail;
-      onResize(folder.id,path,clampDelta(i,delta,avail));
-    };
-    const up = () => {
-      target.classList.remove('dragging');
-      target.removeEventListener('pointermove', move);
-      target.removeEventListener('pointerup', up);
-      onResizeEnd();
-    };
-    target.addEventListener('pointermove', move);
-    target.addEventListener('pointerup', up);
-  };
-
-
-  const onDividerKey = (i: number) => (e: React.KeyboardEvent<HTMLDivElement>) => {
-    const horizontal = node.axis === 'columns';
-    const dec = horizontal ? 'ArrowLeft' : 'ArrowUp';
-    const inc = horizontal ? 'ArrowRight' : 'ArrowDown';
-    if (![dec, inc, 'Home', 'End'].includes(e.key)) return;
-    e.preventDefault();
-    const avail = availOf();
-    if (avail <= 0) return;
-    const step = (e.shiftKey ? 64 : 24) / avail;
-    const delta = e.key === dec ? -step : e.key === inc ? step
-                : e.key === 'Home' ? -1 : 1;   // clamp turns ±1 into the legal limit
-    onResize(folder.id,path,clampDelta(i,delta,avail));
-  };
-
-  return (
-    <div className={'split ' + node.axis} ref={ref}>
-      {node.children.map((child, i) => (
-        <React.Fragment key={child.type === 'pane' ? child.id : 's' + i}>
-          {i > 0 ? (
-            <div className="divider" onPointerDown={startDrag(i - 1)} onKeyDown={onDividerKey(i - 1)}
-                 role="separator" tabIndex={0}
-                 aria-orientation={node.axis === 'columns' ? 'vertical' : 'horizontal'}
-                 aria-label={'Resize ' + (node.axis === 'columns' ? 'columns ' : 'rows ') + i + ' and ' + (i + 1)}
-                 aria-valuemin={0} aria-valuemax={100}
-                 aria-valuenow={Math.round(node.sizes.slice(0, i).reduce((a, b) => a + b, 0) * 100)} />
-          ) : null}
-          <div className="slot" style={{ flexBasis: 'calc((100% - ' + gaps + 'px) * ' + node.sizes[i] + ')' }}>
-            <Node node={child} folder={folder} runtime={runtime} active={active} focusId={focusId} closingId={closingId} focusReq={focusReq}
-                  completedByPane={completedByPane} resizing={resizing} useTmux={useTmux} onResizeStart={onResizeStart} onResizeEnd={onResizeEnd}
-                  onFocus={onFocus} onSplit={onSplit} onClose={onClose} canClose={canClose}
-                  onResize={onResize} onOpenSettings={onOpenSettings} onOpenWorkspaceSettings={onOpenWorkspaceSettings} onCommandComplete={onCommandComplete} onOutputActivity={onOutputActivity} path={path.concat(i)} />
-          </div>
-        </React.Fragment>
-      ))}
-    </div>
-  );
+  return node && node.type === 'split' ? node : null;
 }
+
+/* Clamp a divider move against both neighbours' minimums, in tree terms. */
+function clampSplit(split: SplitNode, index: number, delta: number, avail: number): number[] {
+  const mins = split.children.map((child) => nodeMin(child, GAP));
+  const columns = split.axis === 'columns';
+  const a0 = split.sizes[index], b0 = split.sizes[index + 1];
+  const minA = (columns ? mins[index].w : mins[index].h) / avail;
+  const minB = (columns ? mins[index + 1].w : mins[index + 1].h) / avail;
+  let lo = minA - a0, hi = b0 - minB;
+  if (hi - lo < 0.01) { lo = FLOOR - a0; hi = b0 - FLOOR; }
+  const d = Math.max(Math.min(delta, hi), lo);
+  const next = split.sizes.slice();
+  next[index] = a0 + d; next[index + 1] = b0 - d;
+  return next;
+}
+
+type ExchangeState = { source: string; target: string | null; mode: 'pointer' | 'keyboard' };
 
 function Surface({ folder, runtime, active, focusId, closingId, focusReq, completedByPane, appResizing, useTmux, fontSize,
-                   onFocus, onSplit, onClose, onResize, onAddFirst, onOpenSettings, onOpenWorkspaceSettings, onCommandComplete, onOutputActivity }: {
+                   onFocus, onSplit, onClose, onResize, onAddFirst, onOpenSettings, onOpenWorkspaceSettings, onCommandComplete, onOutputActivity,
+                   onExchange }: {
   folder: Folder;
   runtime: Runtime;
   active: boolean;
@@ -917,10 +851,15 @@ function Surface({ folder, runtime, active, focusId, closingId, focusReq, comple
   onOpenWorkspaceSettings: (folderId:string) => void;
   onCommandComplete: (event:CommandCompletion) => void;
   onOutputActivity: (folderId:string, bytes:number) => void;
+  onExchange: (folderId:string, a:string, b:string) => void;
 }) {
   const viewport = useRef<HTMLDivElement | null>(null);
   const [box, setBox] = useState({ w: 0, h: 0 });
   const [resizing, setResizing] = useState(false);
+  const [exchange,setExchange]=useState<ExchangeState|null>(null);
+  const [announcement,setAnnouncement]=useState('');
+  const announce=(message:string)=>{setAnnouncement('');requestAnimationFrame(()=>setAnnouncement(message))};
+  useEffect(()=>{if(!active)setAnnouncement('')},[active]);
 
   useLayoutEffect(() => {
     const el = viewport.current;
@@ -935,21 +874,192 @@ function Surface({ folder, runtime, active, focusId, closingId, focusReq, comple
 
   const min = useMemo(() => nodeMin(folder.layout,GAP), [folder.layout]);
   const canClose = useMemo(()=>countPanes(folder.layout)>1,[folder.layout]);
-  const startResizing=useCallback(()=>setResizing(true),[]),endResizing=useCallback(()=>setResizing(false),[]);
+  const onResizeStart=useCallback(()=>setResizing(true),[]),onResizeEnd=useCallback(()=>setResizing(false),[]);
+
+  const canvas = {
+    w: Math.max(box.w, Math.ceil(min.w)),
+    h: Math.max(box.h, Math.ceil(min.h)),
+  };
+  const frames = useMemo(
+    () => layoutFrames(folder.layout, { x: 0, y: 0, w: canvas.w, h: canvas.h }, GAP),
+    [folder.layout, canvas.w, canvas.h]);
+  const paneFrames = frames.panes;
+  const canExchange = paneFrames.length > 1;
+  const labelOf = (id: string) => {
+    const at = paneFrames.findIndex((item) => item.pane.id === id);
+    return at < 0 ? 'terminal' : 'terminal ' + (at + 1) + ' of ' + paneFrames.length;
+  };
+
+  /* Focus follows the moved terminal so the exchange feels like one action. */
+  const commitExchange=(a:string,b:string)=>{
+    onExchange(folder.id,a,b);announce('Exchanged '+labelOf(a)+' with '+labelOf(b)+'.');
+  };
+  const cancelExchange=(reason='Exchange cancelled.')=>{setExchange(null);announce(reason)};
+  useEffect(()=>{
+    if(!exchange)return;
+    if(!active){setExchange(null);return}
+    if(exchange.mode!=='keyboard')return;
+    const cancelKey=(event:KeyboardEvent)=>{
+      if(event.key!=='Escape')return;
+      event.preventDefault();event.stopPropagation();cancelExchange();
+    };
+    const cancelOnDeparture=(event:FocusEvent)=>{
+      const target=event.target,source=document.querySelector<HTMLElement>(`[data-pane-id="${CSS.escape(exchange.source)}"] .pane-grip`);
+      if(!(target instanceof Node)||!source?.contains(target))cancelExchange();
+    };
+    addEventListener('keydown',cancelKey,{capture:true});addEventListener('focusin',cancelOnDeparture);
+    return()=>{removeEventListener('keydown',cancelKey,{capture:true});removeEventListener('focusin',cancelOnDeparture)};
+  },[active,exchange]);
+
+  const paneUnder = (x: number, y: number): string | null => {
+    const host = viewport.current;
+    if (!host) return null;
+    for (const element of document.elementsFromPoint(x, y)) {
+      const pane = element instanceof HTMLElement ? element.closest<HTMLElement>('.pane') : null;
+      if (pane && host.contains(pane) && pane.dataset.paneId) return pane.dataset.paneId;
+    }
+    return null;
+  };
+
+  const onExchangePointer=(paneId:string,event:React.PointerEvent<HTMLButtonElement>)=>{
+    if(event.button!==0||!canExchange)return;
+    event.preventDefault();event.stopPropagation();
+    const trigger=event.currentTarget,pointerId=event.pointerId;
+    let target:string|null=null,done=false;
+    trigger.setPointerCapture(pointerId);
+    setExchange({source:paneId,target:null,mode:'pointer'});
+    announce('Exchanging '+labelOf(paneId)+'. Drop on another pane.');
+
+    const move=(moveEvent:PointerEvent)=>{
+      const over=paneUnder(moveEvent.clientX,moveEvent.clientY),next=over&&over!==paneId?over:null;
+      if(next===target)return;
+      target=next;
+      setExchange((current)=>current?.mode==='pointer'?{...current,target:next}:current);
+    };
+    const finish=(commit:boolean)=>{
+      if(done)return;done=true;
+      trigger.removeEventListener('pointermove',move);trigger.removeEventListener('pointerup',up);
+      trigger.removeEventListener('pointercancel',cancel);trigger.removeEventListener('lostpointercapture',cancel);
+      removeEventListener('keydown',escape,{capture:true});
+      if(trigger.hasPointerCapture(pointerId))trigger.releasePointerCapture(pointerId);
+      if(commit&&target)commitExchange(paneId,target);
+      else announce('Exchange cancelled.');
+      setExchange(null);
+    };
+    const up=(upEvent:PointerEvent)=>{
+      const over=paneUnder(upEvent.clientX,upEvent.clientY);target=over&&over!==paneId?over:null;finish(!!target);
+    },cancel=()=>finish(false);
+    const escape=(keyEvent:KeyboardEvent)=>{if(keyEvent.key==='Escape'){keyEvent.preventDefault();finish(false)}};
+    trigger.addEventListener('pointermove',move);trigger.addEventListener('pointerup',up);
+    trigger.addEventListener('pointercancel',cancel);trigger.addEventListener('lostpointercapture',cancel);
+    addEventListener('keydown',escape,{capture:true});
+  };
+
+  const onExchangeKey = (paneId: string, event: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (!canExchange) return;
+    const keyboardActive = exchange && exchange.mode === 'keyboard' && exchange.source === paneId;
+    if (event.key === 'Enter' || event.key === ' ' || event.key === 'Spacebar') {
+      event.preventDefault();
+      if (!keyboardActive) {
+        setExchange({source:paneId,target:null,mode:'keyboard'});
+        announce('Exchanging '+labelOf(paneId)+'. Use arrow keys to choose a pane, Enter to swap, Escape to cancel.');
+        return;
+      }
+      if(exchange.target)commitExchange(paneId,exchange.target);
+      else announce('Exchange cancelled.');
+      setExchange(null);
+      return;
+    }
+    if (event.key === 'Escape' && keyboardActive) {
+      event.preventDefault();
+      event.stopPropagation();
+      cancelExchange();
+      return;
+    }
+    const directions: Record<string, Direction> = {
+      ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down',
+    };
+    const direction = directions[event.key];
+    if (!direction || !keyboardActive) return;
+    event.preventDefault();
+    const from=exchange.target||paneId,next=neighborPane(paneFrames,from,direction);
+    if(!next)return;
+    if(next.id===paneId){setExchange({...exchange,target:null});announce(labelOf(paneId)+' selected as the source. Choose another pane.');return}
+    setExchange({...exchange,target:next.id});
+    announce(labelOf(next.id)+' selected. Enter swaps, Escape cancels.');
+  };
+
+  /* Resize keeps working on the tree while rendering stays flat. */
+  const startDividerDrag = (path:number[],index:number,avail:number) => (event:React.PointerEvent<HTMLDivElement>) => {
+    const split=splitAt(folder.layout,path);
+    if(!split||avail<=0)return;
+    event.preventDefault();
+    const columns=split.axis==='columns';
+    const startPos = columns ? event.clientX : event.clientY;
+    const target = event.currentTarget;
+    target.focus();
+    target.classList.add('dragging');
+    target.setPointerCapture(event.pointerId);
+    onResizeStart();
+    const move = (moveEvent: PointerEvent) => {
+      const delta = ((columns ? moveEvent.clientX : moveEvent.clientY) - startPos) / avail;
+      onResize(folder.id, path, clampSplit(split, index, delta, avail));
+    };
+    let done=false;
+    const finish=()=>{
+      if(done)return;done=true;target.classList.remove('dragging');
+      target.removeEventListener('pointermove',move);target.removeEventListener('pointerup',finish);
+      target.removeEventListener('pointercancel',finish);target.removeEventListener('lostpointercapture',finish);
+      onResizeEnd();
+    };
+    target.addEventListener('pointermove',move);target.addEventListener('pointerup',finish);
+    target.addEventListener('pointercancel',finish);target.addEventListener('lostpointercapture',finish);
+  };
+
+  const onDividerKey = (path:number[],index:number,avail:number) => (event:React.KeyboardEvent<HTMLDivElement>) => {
+    const split=splitAt(folder.layout,path);
+    if(!split||avail<=0)return;
+    const columns=split.axis==='columns';
+    const dec=columns?'ArrowLeft':'ArrowUp',inc=columns?'ArrowRight':'ArrowDown';
+    if(![dec,inc,'Home','End'].includes(event.key))return;
+    event.preventDefault();
+    const step = (event.shiftKey ? 64 : 24) / avail;
+    const delta = event.key === dec ? -step : event.key === inc ? step
+                : event.key === 'Home' ? -1 : 1;   // clamp turns ±1 into the legal limit
+    onResize(folder.id, path, clampSplit(split, index, delta, avail));
+  };
 
   return (
     <div className="surface" hidden={!active} style={{'--term-font-size':fontSize+'px'}}>
       <div className="viewport" ref={viewport}>
         {folder.layout ? (
-          <div className="canvas" style={{
-            width: Math.max(box.w, Math.ceil(min.w)),
-            height: Math.max(box.h, Math.ceil(min.h)),
-          }}>
-            <Node node={folder.layout} folder={folder} runtime={runtime} active={active} focusId={focusId} closingId={closingId} focusReq={focusReq}
-                  completedByPane={completedByPane} resizing={resizing || appResizing} useTmux={useTmux}
-                  onResizeStart={startResizing} onResizeEnd={endResizing}
-                  onFocus={onFocus} onSplit={onSplit} onClose={onClose} canClose={canClose}
-                  onResize={onResize} onOpenSettings={onOpenSettings} onOpenWorkspaceSettings={onOpenWorkspaceSettings} onCommandComplete={onCommandComplete} onOutputActivity={onOutputActivity} path={[]} />
+          <div className="canvas" style={{ width: canvas.w, height: canvas.h }}>
+            {frames.dividers.map((divider) => (
+              <div key={divider.key} className={'divider ' + divider.axis}
+                   style={{ left: divider.x + 'px', top: divider.y + 'px', width: divider.w + 'px', height: divider.h + 'px' }}
+                   onPointerDown={startDividerDrag(divider.path,divider.index,divider.available)}
+                   onKeyDown={onDividerKey(divider.path,divider.index,divider.available)}
+                   role="separator" tabIndex={0}
+                   aria-orientation={divider.axis === 'columns' ? 'vertical' : 'horizontal'}
+                   aria-label={'Resize ' + (divider.axis === 'columns' ? 'columns ' : 'rows ') + (divider.index + 1) + ' and ' + (divider.index + 2)}
+                   aria-valuemin={0} aria-valuemax={100}
+                   aria-valuenow={Math.round(divider.before * 100)} />
+            ))}
+            {paneFrames.map((item, index) => (
+              <Pane key={item.pane.id} node={item.pane} folder={folder} runtime={runtime} active={active}
+                    focused={focusId === item.pane.id} completed={completedByPane[item.pane.id] || 0}
+                    closing={closingId === item.pane.id}
+                    focusReq={focusReq?.id === item.pane.id ? focusReq : null}
+                    resizing={resizing || appResizing || !!exchange} useTmux={useTmux}
+                    frame={{ x: item.x, y: item.y, w: item.w, h: item.h }}
+                    exchangeRole={exchange ? (exchange.source === item.pane.id ? 'source' : exchange.target === item.pane.id ? 'target' : null) : null}
+                    exchangeActive={!!exchange} canExchange={canExchange}
+                    position={index + 1} paneCount={paneFrames.length}
+                    onFocus={onFocus} onSplit={onSplit} onClose={onClose} canClose={canClose}
+                    onOpenSettings={onOpenSettings} onOpenWorkspaceSettings={onOpenWorkspaceSettings}
+                    onCommandComplete={onCommandComplete} onOutputActivity={onOutputActivity}
+                    onExchangePointer={onExchangePointer} onExchangeKey={onExchangeKey} />
+            ))}
           </div>
         ) : (
           <div className="empty-add">
@@ -957,6 +1067,7 @@ function Surface({ folder, runtime, active, focusId, closingId, focusReq, comple
           </div>
         )}
       </div>
+      <div className="sr-live" role="status" aria-live="polite">{active ? announcement : ''}</div>
     </div>
   );
 }
@@ -1392,14 +1503,16 @@ function CommandPalette({ folders, activeId, onPick, onClose, inputRef }: {
 const folderLabel = (f: Folder) => f.name || f.cwd.split('/').filter((s: string) => s && s !== '~').pop() || 'workspace';
 
 function ShortcutsDialog({onClose}:{onClose:()=>void}) {
-  const groups=[['Workspaces',[['Alt + 1…9','Switch workspace and restore its last terminal'],['Ctrl/⌘ + Shift + ,','Workspace settings']]],['Panes',[['Alt + Arrow keys','Move between terminals'],['Arrow keys','Navigate an open pane menu'],['Enter','Activate the selected item']]],['Application',[['Ctrl/⌘ + K or P','Find a workspace or terminal'],['Ctrl/⌘ + B','Toggle sidebar'],['Ctrl/⌘ + ,','Global settings'],['Escape','Close a menu or dialog']]]] as const;
+  const groups=[['Workspaces',[['Alt + 1…9','Switch workspace and restore its last terminal'],['Ctrl/⌘ + Shift + ,','Workspace settings']]],['Panes',[['Alt + Arrow keys','Move between terminals'],['Enter · ↑↓ · Enter','Exchange terminals from the focused handle'],['Arrow keys','Navigate an open pane menu'],['Enter','Activate the selected item']]],['Application',[['Ctrl/⌘ + K or P','Find a workspace or terminal'],['Ctrl/⌘ + B','Toggle sidebar'],['Ctrl/⌘ + ,','Global settings'],['Escape','Close a menu or dialog']]]] as const;
   return <ModalForm variant="shortcuts-dialog" title="Keyboard shortcuts" onClose={onClose}>{groups.map(([title,items])=><section key={title} className="shortcut-group"><h3>{title}</h3>{items.map(([keys,label])=><div key={keys} className="shortcut-row"><kbd>{keys}</kbd><span>{label}</span></div>)}</section>)}</ModalForm>;
 }
 
 type FolderMenuState={source:'trigger'|'context';x:number;y:number};
-function FolderRow({folder,compact,index,count,active,activity,canRemove,completedByPane,onFocus,onRemove,onMove}:{
+function FolderRow({folder,compact,index,count,active,activity,canRemove,completedByPane,dragging,dragOffset,reordering,onDragStart,onFocus,onRemove,onMove}:{
   folder:Folder;compact:boolean;index:number;count:number;active:boolean;activity:number;canRemove:boolean;
-  completedByPane:Record<string,number>;onFocus:(folder:Folder)=>void;onRemove:(id:string)=>void;onMove:(id:string,targetIndex:number)=>void;
+  completedByPane:Record<string,number>;dragging:boolean;dragOffset:number;reordering:boolean;
+  onDragStart:(folderId:string,event:React.PointerEvent<HTMLElement>)=>void;
+  onFocus:(folder:Folder)=>void;onRemove:(id:string)=>void;onMove:(id:string,targetIndex:number)=>void;
 }){
   const label=folderLabel(folder),completed=listPanes(folder.layout).reduce((sum,pane)=>sum+(completedByPane[pane.id]||0),0);
   const [menu,setMenu]=useState<FolderMenuState|null>(null);
@@ -1419,19 +1532,17 @@ function FolderRow({folder,compact,index,count,active,activity,canRemove,complet
     else if(event.key==='ArrowUp'||event.key==='ArrowLeft'){event.preventDefault();items[(at-1+items.length)%items.length]?.focus()}
     else if(event.key==='Escape'){event.preventDefault();event.stopPropagation();closeToSource()}
   };
-  return <div className={'folder'+(active?' active':'')+(activity?' activity-'+activity:'')} title={label+(index<9?': Alt+'+(index+1):'')}
-              onDragOver={(event:React.DragEvent<HTMLDivElement>)=>{if(event.dataTransfer.types.includes('application/x-ttydterm-workspace')){event.preventDefault();event.currentTarget.classList.add('drop-target')}}}
-              onDragLeave={(event:React.DragEvent<HTMLDivElement>)=>event.currentTarget.classList.remove('drop-target')}
-              onDrop={(event:React.DragEvent<HTMLDivElement>)=>{event.currentTarget.classList.remove('drop-target');const id=event.dataTransfer.getData('application/x-ttydterm-workspace');if(id){event.preventDefault();onMove(id,index)}}}
+  return <div className={'folder'+(active?' active':'')+(activity?' activity-'+activity:'')+(dragging?' dragging':'')+(reordering?' reordering':'')}
+              title={label+(index<9?': Alt+'+(index+1):'')}
+              style={reordering?{transform:'translateY('+dragOffset+'px)'}:undefined}
               onContextMenu={(event:React.MouseEvent<HTMLDivElement>)=>{event.preventDefault();event.stopPropagation();setMenu({source:'context',x:event.clientX,y:event.clientY})}}>
     {activity?<span className="folder-activity" aria-hidden="true"/>:null}
     <button ref={main} type="button" className="folder-main" aria-current={active?'true':undefined}
             aria-keyshortcuts={index<9?'Alt+'+(index+1):undefined}
             aria-label={(compact?label:'Workspace '+label)+', position '+(index+1)+' of '+count+(completed?', '+completed+' completed command'+(completed===1?'':'s'):'')+(index<9?', Alt+'+(index+1):'')}
             onClick={()=>onFocus(folder)} onDoubleClick={()=>go('f',folder.id,'settings')}>
-      <span className="folder-badge" draggable="true" title={'Drag to reorder '+label}
-            onDragStart={(event:React.DragEvent<HTMLSpanElement>)=>{event.dataTransfer.effectAllowed='move';event.dataTransfer.setData('application/x-ttydterm-workspace',folder.id);event.currentTarget.closest('.folder')?.classList.add('dragging')}}
-            onDragEnd={(event:React.DragEvent<HTMLSpanElement>)=>{event.currentTarget.closest('.folder')?.classList.remove('dragging');document.querySelectorAll('.folder.drop-target').forEach((row)=>row.classList.remove('drop-target'))}}>
+      <span className="folder-badge" title={'Drag to reorder '+label}
+            onPointerDown={(event:React.PointerEvent<HTMLSpanElement>)=>onDragStart(folder.id,event)}>
         {folder.icon?<WsIcon name={folder.icon}/>:initials(label)}
       </span>
       {compact?null:<span className="folder-name">{label}</span>}
@@ -1661,6 +1772,14 @@ function App() {
     patchFolder(folderId,(folder)=>({...folder,layout:pane('bash',ui.useTmux)}));
   },[patchFolder,ui.useTmux]);
 
+  /* Exchanging trades two pane leaves. Terminals stay mounted because every
+     pane keeps its id, and React keys panes by that id. */
+  const onPaneExchange=useCallback((folderId:string,a:string,b:string)=>{
+    patchFolder(folderId,(folder)=>({...folder,layout:swapPanes(folder.layout,a,b)}));
+    setFocusId(a);
+    setFocusReq({id:a,n:Date.now()});
+  },[patchFolder]);
+
   const moveFolder=useCallback((id:string,targetIndex:number)=>setConfig((current)=>{
     const source=current.folders.findIndex((folder)=>folder.id===id);
     if(source<0||targetIndex<0||targetIndex>=current.folders.length||source===targetIndex)return current;
@@ -1688,14 +1807,15 @@ function App() {
     target.setPointerCapture(e.pointerId);
     setAppResizing(true);
     const move = (ev: PointerEvent) => setUi({ railWidth: clamp(Math.round(ev.clientX - left), RAIL_MIN, RAIL_MAX) });
-    const up = () => {
-      target.classList.remove('dragging');
-      target.removeEventListener('pointermove', move);
-      target.removeEventListener('pointerup', up);
+    let done=false;
+    const finish=()=>{
+      if(done)return;done=true;target.classList.remove('dragging');
+      target.removeEventListener('pointermove',move);target.removeEventListener('pointerup',finish);
+      target.removeEventListener('pointercancel',finish);target.removeEventListener('lostpointercapture',finish);
       setAppResizing(false);
     };
-    target.addEventListener('pointermove', move);
-    target.addEventListener('pointerup', up);
+    target.addEventListener('pointermove',move);target.addEventListener('pointerup',finish);
+    target.addEventListener('pointercancel',finish);target.addEventListener('lostpointercapture',finish);
   };
   const onRailKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
@@ -1741,6 +1861,105 @@ function App() {
     else focusFolderPane(row.folder);
   };
 
+  /* Surfaces render in first-mount order, never in sidebar order. Reordering
+     workspaces must not move a live terminal's DOM node. */
+  const surfaceOrder=useRef<string[]>([]);
+  {
+    const live=new Set(folders.map((folder)=>folder.id));
+    const kept=surfaceOrder.current.filter((id)=>live.has(id));
+    const known=new Set(kept);
+    surfaceOrder.current=kept.concat(folders.filter((folder)=>!known.has(folder.id)).map((folder)=>folder.id));
+  }
+  const mountedFolders=surfaceOrder.current
+    .map((id)=>folders.find((folder)=>folder.id===id))
+    .filter((folder): folder is Folder => !!folder);
+
+  /* Sidebar rows preview their final slots with transforms. The persisted
+     array changes once on release, so a pointermove never writes localStorage. */
+  const [dragOrder,setDragOrder]=useState<string[]|null>(null);
+  const [workspaceAnnouncement,setWorkspaceAnnouncement]=useState('');
+  const announceWorkspace=(message:string)=>{setWorkspaceAnnouncement('');requestAnimationFrame(()=>setWorkspaceAnnouncement(message))};
+  const [draggingFolder,setDraggingFolder]=useState<{id:string;offset:number;stride:number}|null>(null);
+  const railListRef=useRef<HTMLDivElement|null>(null),suppressFolderClick=useRef<string|null>(null);
+
+  const startFolderDrag=useCallback((folderId:string,event:React.PointerEvent<HTMLElement>)=>{
+    if(event.button!==0||folders.length<2)return;
+    const list=railListRef.current,row=event.currentTarget.closest<HTMLElement>('.folder'),trigger=event.currentTarget;
+    if(!list||!row)return;
+    const initialOrder=folders.map((folder)=>folder.id),sourceIndex=initialOrder.indexOf(folderId);
+    const rows=[...list.querySelectorAll<HTMLElement>('.folder')];
+    const stride=rows.length>1?Math.abs(rows[1].offsetTop-rows[0].offsetTop):row.offsetHeight;
+    if(sourceIndex<0||stride<=0)return;
+    const startY=event.clientY,startScroll=list.scrollTop,firstTop=rows[0]?.offsetTop||0;
+    let order=initialOrder,dragging=false,lastY=startY,scrollTimer=0,done=false;
+    trigger.setPointerCapture(event.pointerId);
+
+    const apply=(clientY:number)=>{
+      lastY=clientY;
+      const offset=clientY-startY+(list.scrollTop-startScroll),slot=(row.offsetTop+offset-firstTop)/stride;
+      const target=clamp(Math.round(slot),0,initialOrder.length-1);
+      setDraggingFolder({id:folderId,offset,stride});
+      const next=initialOrder.slice(),[moved]=next.splice(sourceIndex,1);next.splice(target,0,moved);
+      if(next.some((id,index)=>id!==order[index])){order=next;setDragOrder(next)}
+    };
+    const stopScroll=()=>{if(scrollTimer){clearInterval(scrollTimer);scrollTimer=0}};
+    const autoScroll=(clientY:number)=>{
+      const box=list.getBoundingClientRect(),edge=28;
+      const speed=clientY<box.top+edge?-12:clientY>box.bottom-edge?12:0;
+      if(!speed){stopScroll();return}
+      if(scrollTimer)return;
+      scrollTimer=window.setInterval(()=>{
+        const before=list.scrollTop;list.scrollTop+=speed;
+        if(list.scrollTop===before){stopScroll();return}
+        apply(lastY);
+      },16);
+    };
+    const move=(moveEvent:PointerEvent)=>{
+      if(!dragging){
+        if(Math.abs(moveEvent.clientY-startY)<4)return;
+        dragging=true;setDragOrder(initialOrder);
+      }
+      moveEvent.preventDefault();apply(moveEvent.clientY);autoScroll(moveEvent.clientY);
+    };
+    const finish=(commit:boolean)=>{
+      if(done)return;done=true;
+      trigger.removeEventListener('pointermove',move);trigger.removeEventListener('pointerup',up);
+      trigger.removeEventListener('pointercancel',cancel);trigger.removeEventListener('lostpointercapture',cancel);
+      removeEventListener('keydown',escape,{capture:true});stopScroll();
+      if(trigger.hasPointerCapture(event.pointerId))trigger.releasePointerCapture(event.pointerId);
+      if(dragging){
+        suppressFolderClick.current=folderId;
+        setTimeout(()=>{if(suppressFolderClick.current===folderId)suppressFolderClick.current=null},0);
+      }
+      if(commit&&dragging){
+        const committed=order.slice(),position=committed.indexOf(folderId)+1;
+        announceWorkspace('Moved workspace '+folderLabel(folders[sourceIndex])+' to position '+position+' of '+committed.length+'.');
+        setConfig((current)=>{
+          const byId=new Map(current.folders.map((folder)=>[folder.id,folder]));
+          const next=committed.map((id)=>byId.get(id)).filter((folder):folder is Folder=>!!folder);
+          return next.length===current.folders.length&&next.some((folder,index)=>folder!==current.folders[index])?{...current,folders:next}:current;
+        });
+      }
+      setDragOrder(null);setDraggingFolder(null);
+    };
+    const up=(upEvent:PointerEvent)=>{
+      const box=list.getBoundingClientRect(),inside=upEvent.clientX>=box.left&&upEvent.clientX<=box.right&&upEvent.clientY>=box.top&&upEvent.clientY<=box.bottom;
+      finish(inside);
+    },cancel=()=>finish(false);
+    const escape=(keyEvent:KeyboardEvent)=>{if(keyEvent.key==='Escape'){keyEvent.preventDefault();finish(false)}};
+    trigger.addEventListener('pointermove',move);trigger.addEventListener('pointerup',up);
+    trigger.addEventListener('pointercancel',cancel);trigger.addEventListener('lostpointercapture',cancel);
+    addEventListener('keydown',escape,{capture:true});
+  },[folders]);
+  const focusFolderFromRow=useCallback((folder:Folder)=>{
+    if(suppressFolderClick.current===folder.id){suppressFolderClick.current=null;return}
+    focusFolderPane(folder);
+  },[focusFolderPane]);
+  const moveFolderWithAnnouncement=(id:string,targetIndex:number)=>{
+    const folder=folders.find((item)=>item.id===id);if(!folder)return;
+    moveFolder(id,targetIndex);announceWorkspace('Moved workspace '+folderLabel(folder)+' to position '+(targetIndex+1)+' of '+folders.length+'.');
+  };
+
 
   return (
     <DocThemeContext.Provider value={setDocTheme}>
@@ -1757,10 +1976,13 @@ function App() {
                   onClick={() => setRailOpen(!railOpen)}><Ico.panel /></button>
         </div>
         {}
-        <div className="rail-list">
-          {folders.map((folder,index)=><FolderRow key={folder.id} folder={folder} index={index} count={folders.length} compact={!railOpen}
+        <div className={'rail-list'+(dragOrder?' reordering':'')} ref={railListRef}>
+          {folders.map((folder,index)=>{const previewIndex=dragOrder?.indexOf(folder.id)??index,offset=draggingFolder?.id===folder.id
+            ?draggingFolder.offset:(previewIndex-index)*(draggingFolder?.stride||0);return <FolderRow key={folder.id} folder={folder} index={index} count={folders.length} compact={!railOpen}
             active={folder.id===active.id} activity={activityByFolder[folder.id]||0} canRemove={folders.length>1} completedByPane={completedByPane}
-            onFocus={focusFolderPane} onRemove={removeFolder} onMove={moveFolder}/>)}
+            dragging={draggingFolder?.id===folder.id} dragOffset={offset}
+            reordering={!!dragOrder} onDragStart={startFolderDrag}
+            onFocus={focusFolderFromRow} onRemove={removeFolder} onMove={moveFolderWithAnnouncement}/>})}
           <button className="ico add" title="New workspace" aria-label="New workspace"
                   onClick={() => go('new')}><Ico.plus /></button>
         </div>
@@ -1768,6 +1990,7 @@ function App() {
         {railOpen?<div className="rail-brand-meta">
           <span className="brand-block"><span className="brand-name">ttydterm</span><span className="brand-version" aria-label={'version '+APP_VERSION}>{APP_VERSION}</span></span>
         </div>:null}
+        <div className="sr-live" role="status" aria-live="polite">{workspaceAnnouncement}</div>
         <div className="rail-foot">
           <button className="ico" title="Keyboard shortcuts" aria-label="Keyboard shortcuts" onClick={()=>go('shortcuts')}><Ico.keyboard /></button>
           <button className="ico rail-global" title="Global settings" aria-label="Global settings" onClick={() => go('settings')}><Ico.gear /></button>
@@ -1792,11 +2015,12 @@ function App() {
 
       <main className="stage">
         {runtime.mode !== 'ttyd' && runtime.mode !== 'mock' ? <SetupNotice mode={runtime.mode} onRetry={()=>{setRuntime({mode:'probing'});detectRuntime().then(setRuntime)}} /> : null}
-        {folders.map((f) => (
+        {mountedFolders.map((f) => (
           <Surface key={f.id} folder={f} runtime={runtime} active={f.id===active.id} focusId={focusId} appResizing={appResizing}
                    closingId={closingId} focusReq={focusReq} completedByPane={completedByPane} useTmux={effectiveTmux} fontSize={workspaceFontSize(f.fontSize,ui.fontSize)}
                    onFocus={onPaneFocus} onSplit={onSplit} onClose={onClose} onResize={onResize}
-                   onAddFirst={addFirstPane} onOpenSettings={openPaneSettings} onOpenWorkspaceSettings={openWorkspaceSettings} onCommandComplete={onCommandComplete} onOutputActivity={onOutputActivity} />
+                   onAddFirst={addFirstPane} onOpenSettings={openPaneSettings} onOpenWorkspaceSettings={openWorkspaceSettings} onCommandComplete={onCommandComplete} onOutputActivity={onOutputActivity}
+                   onExchange={onPaneExchange} />
         ))}
       </main>
 

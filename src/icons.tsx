@@ -20,6 +20,7 @@ export const Ico = {
   search: svg('search', <><circle cx="11" cy="11" r="6.2" /><path d="m20 20-4.6-4.6" /></>),
   keyboard: svg('keyboard', <><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M6 9h.01M9 9h.01M12 9h.01M15 9h.01M18 9h.01M7 12h.01M10 12h.01M13 12h.01M16 12h.01M7 15h10"/></>),
   paste:svg('paste',<><path d="M9 5h6v3H9z"/><path d="M8 6H6v14h12V6h-2M9 12h6M9 16h5"/></>),
+  grip: svg('grip', <><circle cx="9" cy="6" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="18" r="1.5"/></>),
 };
 
 export const WS_ICONS: Record<string, React.ReactElement> = {

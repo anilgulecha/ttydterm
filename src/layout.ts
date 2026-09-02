@@ -67,3 +67,90 @@ export const findPane=(node:LayoutNode|null,id:string|undefined):PaneNode|null=>
 
 export const countPanes=(node:LayoutNode|null):number=>{let count=0;eachPane(node,()=>count++);return count};
 export const listPanes=(node:LayoutNode|null):PaneNode[]=>{const panes:PaneNode[]=[];eachPane(node,(item)=>panes.push(item));return panes};
+
+/* Exchange two panes in place. Split axes and sizes never move, so only the two
+   leaves trade positions and every other branch keeps its identity. */
+export function swapPanes(node:LayoutNode|null,a:string,b:string):LayoutNode|null{
+  if(!node||a===b)return node;
+  const first=findPane(node,a),second=findPane(node,b);
+  if(!first||!second)return node;
+  return mapTree(node,(current)=>{
+    if(current.type!=='pane')return current;
+    if(current.id===a)return second;
+    if(current.id===b)return first;
+    return current;
+  });
+}
+
+export interface Frame { x:number; y:number; w:number; h:number }
+export interface PaneFrame extends Frame { pane:PaneNode }
+export interface DividerFrame extends Frame {
+  key:string;
+  axis:SplitAxis;
+  path:number[];
+  index:number;
+  /* Drawable span excluding this split's gutters, used by resize math. */
+  available:number;
+  /* Share of the split consumed before this divider, for aria-valuenow. */
+  before:number;
+}
+export interface LayoutFrames { panes:PaneFrame[]; dividers:DividerFrame[] }
+
+/* Flatten the layout tree into absolute boxes. Rendering panes from this list
+   keeps every pane a direct, stably keyed child, so exchanging panes across
+   branches cannot unmount a live terminal. */
+export function layoutFrames(node:LayoutNode|null,box:Frame,gap:number,path:number[]=[]):LayoutFrames{
+  if(!node)return {panes:[],dividers:[]};
+  if(node.type==='pane')return {panes:[{pane:node,...box}],dividers:[]};
+  const panes:PaneFrame[]=[],dividers:DividerFrame[]=[];
+  const columns=node.axis==='columns';
+  const total=(columns?box.w:box.h)-(node.children.length-1)*gap;
+  let offset=columns?box.x:box.y,before=0;
+  node.children.forEach((child,index)=>{
+    const span=total*node.sizes[index];
+    const childBox:Frame=columns
+      ? {x:offset,y:box.y,w:span,h:box.h}
+      : {x:box.x,y:offset,w:box.w,h:span};
+    const nested=layoutFrames(child,childBox,gap,path.concat(index));
+    panes.push(...nested.panes);dividers.push(...nested.dividers);
+    offset+=span;
+    if(index<node.children.length-1){
+      before+=node.sizes[index];
+      dividers.push({
+        key:path.join('-')+':'+index,
+        axis:node.axis,path,index,available:total,before,
+        ...(columns
+          ? {x:offset,y:box.y,w:gap,h:box.h}
+          : {x:box.x,y:offset,w:box.w,h:gap}),
+      });
+      offset+=gap;
+    }
+  });
+  return {panes,dividers};
+}
+
+export type Direction='left'|'right'|'up'|'down';
+
+/* Pick the nearest pane in one direction from rendered geometry. Keyboard
+   exchange uses this so arrow keys follow what the user sees. */
+export function neighborPane(frames:PaneFrame[],fromId:string,direction:Direction):PaneNode|null{
+  const from=frames.find((frame)=>frame.pane.id===fromId);
+  if(!from)return null;
+  const fromCx=from.x+from.w/2,fromCy=from.y+from.h/2;
+  let best:PaneFrame|null=null,bestScore=Infinity;
+  for(const frame of frames){
+    if(frame.pane.id===fromId)continue;
+    const cx=frame.x+frame.w/2,cy=frame.y+frame.h/2;
+    const dx=cx-fromCx,dy=cy-fromCy;
+    const along=direction==='left'?-dx:direction==='right'?dx:direction==='up'?-dy:dy;
+    if(along<=0.5)continue;
+    const across=direction==='left'||direction==='right'?Math.abs(dy):Math.abs(dx);
+    const overlap=direction==='left'||direction==='right'
+      ? Math.min(from.y+from.h,frame.y+frame.h)-Math.max(from.y,frame.y)
+      : Math.min(from.x+from.w,frame.x+frame.w)-Math.max(from.x,frame.x);
+    /* Prefer panes that share an edge band, then the closest one. */
+    const score=along+across*(overlap>0?0.35:4);
+    if(score<bestScore){bestScore=score;best=frame}
+  }
+  return best?best.pane:null;
+}

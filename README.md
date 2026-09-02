@@ -9,7 +9,7 @@ A terminal in your browser, with unix tools (ttyd, tmux) that you love and trust
 ## Features
 
 - **Workspaces:** Keep projects and terminals separate, then drag their icons to set the order.
-- **Split panes:** Arrange rows and columns.
+- **Split panes:** Arrange rows and columns, then exchange running terminals between pane slots.
 - **Pane setup:** Choose each command and working directory.
 - **tmux continuity:** Keep processes running through disconnects.
 - **Completion alerts:** Mark finished commands and notify when away.

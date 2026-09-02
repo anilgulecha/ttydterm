@@ -213,3 +213,15 @@ These rules apply to terminal workspaces and other single-file browser tools.
 
 64. Clamp context menus from their measured box after layout. Fixed height guesses
     fail when actions change, and initial focus must skip disabled menu items.
+
+65. Reordering previews should stay ephemeral. Move visible rows under pointer
+    control, persist once on release, and keep long-lived content in a stable DOM
+    order when its visual order does not matter.
+
+66. A layout leaf can outlive its tree position only when rendering ownership is
+    independent of that position. Flatten stably keyed clients and derive their
+    geometry from the tree before offering cross-branch drag operations.
+
+67. Drag cancellation is a complete interaction path. Release capture, stop edge
+    scrolling, clear every transient cue, suppress the trailing click, and restore
+    keyboard focus without disposing the controlled resource.

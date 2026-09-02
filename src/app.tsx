@@ -19,7 +19,7 @@ window.__terminalAtmosphere = { seededPane, softHorizonBackground, paneGridIndex
 
 const STORE_KEY = 'ttyd-workspace-v2';
 const BG_KEY = 'ttyd-workspace-bg';
-const CONFIG_VERSION = 7;
+const CONFIG_VERSION = 8;
 const FONT_SIZES = [11, 12, 13, 14, 16, 18];
 const FONT_WEIGHTS: Array<{key:FontWeight;label:string;value:number}> = [{key:'regular',label:'Regular',value:400},{key:'semibold',label:'Semi bold',value:600},{key:'bold',label:'Bold',value:700}];
 const PATTERNS: PatternName[] = ['plain','dots','grid','diagonal','cross','waves','bricks'];
@@ -35,12 +35,36 @@ const RAIL_MIN = 148, RAIL_MAX = 420, RAIL_DEFAULT = 176;
 const RAIL_COLLAPSED = 52;
 const COMPLETION_ATTENTION_MS = 5000;
 
+/* Activity: ephemeral output intensity per workspace. Never persisted. */
+const ACTIVITY_TICK_MS = 250;      // coalescing cadence, well below a frame budget
+const ACTIVITY_DECAY = 0.68;       // per tick; a saturated burst fades out in about 3 seconds
+const ACTIVITY_FLOOR = 24;         // rolling bytes below this read as idle
+const ACTIVITY_REFERENCE = 4096;   // rolling bytes that saturate the top level
+const ACTIVITY_LEVELS = 3;
+const ACTIVITY_GRACE_MS = 700;     // startup banner/launch echo is not user activity
+const PRIMARY_SELECTION_HINT = 'Primary selection paste is unavailable here. Use right-click Paste.';
+window.__primarySelectionHint = PRIMARY_SELECTION_HINT;
+
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
+
+/* Pure: rolling byte total to a capped level. Log scale so a chatty tail and a
+   quiet prompt still separate, and a flood cannot exceed the top bucket. */
+const activityLevel = (bytes: number): number => {
+  if (!Number.isFinite(bytes) || bytes < ACTIVITY_FLOOR) return 0;
+  const ratio = Math.log(bytes / ACTIVITY_FLOOR + 1) / Math.log(ACTIVITY_REFERENCE / ACTIVITY_FLOOR + 1);
+  return clamp(Math.ceil(ratio * ACTIVITY_LEVELS), 1, ACTIVITY_LEVELS);
+};
+window.__activityLevel = activityLevel;
+
+/* Pure: a workspace override wins over the global size; anything else is global. */
+const workspaceFontSize = (folderFontSize: number | undefined, globalFontSize: number): number =>
+  typeof folderFontSize === 'number' && FONT_SIZES.includes(folderFontSize) ? folderFontSize : globalFontSize;
+window.__workspaceFontSize = workspaceFontSize;
 
 function defaultConfig(): Config {
   return {
     version: CONFIG_VERSION,
-    ui: { railWidth: RAIL_DEFAULT, railOpen: true, fontSize: 13, fontWeight:'regular', notifyOnCommandFinish:false },
+    ui: { railWidth: RAIL_DEFAULT, railOpen: true, fontSize: 13, fontWeight:'regular', notifyOnCommandFinish:false, useTmux:true },
     folders: [
       {
         id: 'f-jr', name: 'kalviumjr', cwd: '~/work/kalviumjr', icon: 'code', pattern: 'dots' as const, theme:'night',
@@ -49,7 +73,7 @@ function defaultConfig(): Config {
           children: [
             pane('pi', true),
             { type: 'split' as const, axis: 'rows' as const, sizes: [0.55, 0.45],
-              children: [ pane('npm run dev', true), pane('git status', false) ] },
+              children: [ pane('npm run dev', true), pane('git status', true) ] },
           ],
         },
       },
@@ -58,7 +82,7 @@ function defaultConfig(): Config {
         layout: { type: 'split' as const, axis: 'rows' as const, sizes: [0.62, 0.38],
           children: [ pane('k9s', true), pane('journalctl -f', true) ] },
       },
-      { id: 'f-notes', name: 'notes', cwd: '~/notes', icon: 'book', pattern: 'diagonal' as const, theme:'paper', layout: pane('ls -la', false) },
+      { id: 'f-notes', name: 'notes', cwd: '~/notes', icon: 'book', pattern: 'diagonal' as const, theme:'paper', layout: pane('ls -la', true) },
     ],
   };
 }
@@ -67,15 +91,20 @@ function validateConfig(raw: unknown): ValidationResult {
   if (!raw || typeof raw !== 'object') return { ok: false, error: 'Not an object.' };
   const source = raw as { folders?: unknown; theme?: unknown; ui?: unknown };
   if (!Array.isArray(source.folders)) return { ok: false, error: 'Missing a `folders` array.' };
-  const seen = new Set<string>();
+  const seen = new Set<string>(),seenFolders=new Set<string>();
+  const freshId=(prefix:string,requested:unknown,used:Set<string>)=>{
+    const safe=typeof requested==='string'&&requested&&!Object.prototype.hasOwnProperty.call(Object.prototype,requested);
+    let id=safe&&!used.has(requested)?requested:uid(prefix);
+    while(used.has(id))id=uid(prefix);used.add(id);return id;
+  };
   const walk = (input: unknown, where: string): LayoutNode | null => {
     if (!input) return null;
     const n = input as Record<string, unknown>;
     if (n.type === 'pane') {
       if (typeof n.command !== 'string') throw new Error(where + ': pane needs a string `command`.');
-      const id = typeof n.id === 'string' && n.id && !seen.has(n.id) ? n.id : uid('p-');
-      seen.add(id);
-      return { type:'pane', id, command: n.command as string, persist: !!n.persist };
+      const id=freshId('p-',n.id,seen);
+      /* tmux is a global policy: every restored pane follows it, whatever it stored. */
+      return { type:'pane', id, command: n.command as string, persist: tmuxPolicy };
     }
     if (n.type === 'split') {
       if (!Array.isArray(n.children) || n.children.length < 2) throw new Error(where + ': split needs 2+ children.');
@@ -90,13 +119,15 @@ function validateConfig(raw: unknown): ValidationResult {
     }
     throw new Error(where + ': unknown node type ' + JSON.stringify(n.type));
   };
+  const rawUi = (source.ui && typeof source.ui === 'object' ? source.ui : {}) as Record<string, unknown>;
+  const tmuxPolicy = rawUi.useTmux === undefined ? true : rawUi.useTmux === true;
   try {
     const folders: Folder[] = source.folders.map((entry: unknown, i: number) => {
       if (!entry || typeof entry !== 'object') throw new Error('folder ' + i + ' is not an object.');
       const f = entry as Record<string, unknown>;
       const legacyTheme = typeof source.theme === 'string' ? source.theme : null;
       return {
-        id: typeof f.id === 'string' && f.id ? f.id : uid('f-'),
+        id:freshId('f-',f.id,seenFolders),
         name: typeof f.name === 'string' ? f.name : '',
         cwd: typeof f.cwd === 'string' ? f.cwd : '~',
         theme: typeof f.theme === 'string' && THEMES[f.theme] ? f.theme
@@ -105,16 +136,17 @@ function validateConfig(raw: unknown): ValidationResult {
         pattern: PATTERNS.includes(f.pattern as PatternName) ? f.pattern as PatternName
                : defaultPattern(typeof f.id === 'string' ? f.id : String(i)),
         layout: walk(f.layout, 'folder ' + i),
+        ...(FONT_SIZES.includes(Number(f.fontSize)) ? { fontSize: Number(f.fontSize) } : {}),
       };
     });
     if (!folders.length) throw new Error('Needs at least one folder.');
-    const rawUi = (source.ui && typeof source.ui === 'object' ? source.ui : {}) as Record<string, unknown>;
     const ui = {
       railWidth: clamp(Number(rawUi.railWidth) || RAIL_DEFAULT, RAIL_MIN, RAIL_MAX),
       railOpen: rawUi.railOpen === undefined ? true : !!rawUi.railOpen,
       fontSize: FONT_SIZES.includes(Number(rawUi.fontSize)) ? Number(rawUi.fontSize) : 13,
       fontWeight: FONT_WEIGHTS.some(({key})=>key===rawUi.fontWeight) ? rawUi.fontWeight as FontWeight : 'regular',
       notifyOnCommandFinish: rawUi.notifyOnCommandFinish === true,
+      useTmux: tmuxPolicy,
     };
     return { ok: true, config: { version: CONFIG_VERSION, ui, folders } };
   } catch (e) { return { ok: false, error: e instanceof Error ? e.message : String(e) }; }
@@ -280,7 +312,7 @@ const docLayout = (page: DocPage): LayoutNode => {
 
 const documentationConfig = (): Config => ({
   version: CONFIG_VERSION,
-  ui: { railWidth: RAIL_DEFAULT, railOpen: true, fontSize: 13, fontWeight: 'regular', notifyOnCommandFinish:false },
+  ui: { railWidth: RAIL_DEFAULT, railOpen: true, fontSize: 13, fontWeight: 'regular', notifyOnCommandFinish:false, useTmux:true },
   folders: DOC_PAGES.map((page) => ({
     id: 'doc-' + page.id, name: page.name, cwd: '~/' + page.id, doc: page.id,
     icon: WS_ICONS[page.icon] ? page.icon : null, pattern: page.pattern, theme: page.theme,
@@ -335,27 +367,29 @@ const pasteIntoTerminal = (term:XtermTerminal, text:string) => {
 };
 window.__pasteIntoTerminal=pasteIntoTerminal;
 
-function RealTerminal({ folder, pane, runtime, active, suspended, titleOwner, onCommandComplete }: {
+function RealTerminal({ folder, pane, runtime, active, suspended, titleOwner, useTmux, onCommandComplete, onOutputActivity }: {
   folder: Folder;
   pane: PaneNode;
   runtime: Runtime;
   active: boolean;
   suspended: boolean;
   titleOwner: boolean;
+  useTmux: boolean;
   onCommandComplete: (event:CommandCompletion) => void;
+  onOutputActivity: (folderId:string, bytes:number) => void;
 }) {
   const host = useRef<HTMLDivElement | null>(null), client = useRef<TerminalClient | null>(null);
   const [state,setState]=useState<ConnectionState>('connecting');
   const [toast,setToast]=useState<string|null>(null);
   const appearanceContext=React.useContext(TerminalAppearanceContext);
-  const appearanceVersion=folder.theme+'\0'+appearanceContext;
+  const appearanceVersion=folder.theme+'\0'+String(folder.fontSize||'global')+'\0'+appearanceContext;
   const appliedAppearance=useRef(''),titleOwnerRef=useRef(titleOwner),paneTitle=useRef(''),appliedTitle=useRef('');
   titleOwnerRef.current=titleOwner;
   useLayoutEffect(() => {
     const hostEl = host.current;
     if (!hostEl || runtime.mode !== 'ttyd') return;
     const appearance=xtermAppearance(hostEl);
-    const term = new globalThis.Terminal({cursorBlink:false,allowTransparency:true,scrollback:pane.persist?0:1000,fontSize:appearance.fontSize,fontWeight:appearance.fontWeight,fontFamily:'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace',convertEol:true,theme:appearance.theme});
+    const term = new globalThis.Terminal({cursorBlink:false,allowTransparency:true,scrollback:useTmux?0:1000,fontSize:appearance.fontSize,fontWeight:appearance.fontWeight,fontFamily:'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace',convertEol:true,theme:appearance.theme});
     appliedAppearance.current=appearanceVersion;
     const fit = new globalThis.FitAddon.FitAddon(); term.loadAddon(fit);
     if(globalThis.WebLinksAddon) term.loadAddon(new globalThis.WebLinksAddon.WebLinksAddon());
@@ -369,25 +403,26 @@ function RealTerminal({ folder, pane, runtime, active, suspended, titleOwner, on
     });
     term.open(hostEl);fit.fit();
     const encoder=new TextEncoder(),decoder=new TextDecoder();
-    const socket=new WebSocket(runtime.endpoints.ws,['tty']);socket.binaryType='arraybuffer';let initialized=false;
+    const socket=new WebSocket(runtime.endpoints.ws,['tty']);socket.binaryType='arraybuffer';let initialized=false,activityReadyAt=0;
     const sendInput=(data: string)=>{if(socket.readyState!==1)return;const bytes=encoder.encode(data),payload=new Uint8Array(bytes.length+1);payload[0]=48;payload.set(bytes,1);socket.send(payload)};
     socket.onopen=()=>{socket.send(encoder.encode(JSON.stringify({AuthToken:runtime.token,columns:term.cols,rows:term.rows})));setState('starting')};
-    socket.onmessage=(event: MessageEvent<ArrayBuffer>)=>{const bytes=new Uint8Array(event.data),command=String.fromCharCode(bytes[0]),data=bytes.slice(1);if(command==='0'){term.write(data);if(!initialized){initialized=true;const launch=paneLaunchCommand({cwd:folder.cwd,command:pane.command,persist:pane.persist,folderLabel:folderLabel(folder),paneId:pane.id,shellIntegration:true});sendInput(`${launch}\r`);setState('ready')}}else if(command==='1'){paneTitle.current=decoder.decode(data)+' · ttydterm';if(titleOwnerRef.current){document.title=paneTitle.current;appliedTitle.current=paneTitle.current}}};
+    socket.onmessage=(event: MessageEvent<ArrayBuffer>)=>{const bytes=new Uint8Array(event.data),command=String.fromCharCode(bytes[0]),data=bytes.slice(1);if(command==='0'){term.write(data);if(!initialized){initialized=true;activityReadyAt=Date.now()+ACTIVITY_GRACE_MS;const launch=paneLaunchCommand({cwd:folder.cwd,command:pane.command,persist:useTmux,folderLabel:folderLabel(folder),paneId:pane.id,shellIntegration:true});sendInput(`${launch}\r`);setState('ready')}else if(Date.now()>=activityReadyAt)onOutputActivity(folder.id,data.byteLength)}else if(command==='1'){paneTitle.current=decoder.decode(data)+' · ttydterm';if(titleOwnerRef.current){document.title=paneTitle.current;appliedTitle.current=paneTitle.current}}};
     socket.onclose=()=>setState('disconnected');socket.onerror=()=>setState('error');
     const input=term.onData(sendInput),resize=term.onResize(({cols,rows})=>socket.readyState===1&&socket.send(encoder.encode('1'+JSON.stringify({columns:cols,rows}))));
-    let toastTimer:ReturnType<typeof setTimeout>;
-    const showToast=(text:string)=>{setToast(text);clearTimeout(toastTimer);toastTimer=setTimeout(()=>setToast(null),1400)};
+    let toastTimer:ReturnType<typeof setTimeout>,primaryTimer:ReturnType<typeof setTimeout>;
+    const showToast=(text:string)=>{setToast(text);clearTimeout(toastTimer);toastTimer=setTimeout(()=>setToast(null),2200)};
     const pasteText=(text:string)=>pasteIntoTerminal(term,text);
     const readClipboard=async()=>{try{pasteText(await navigator.clipboard.readText())}catch{showToast('Clipboard access blocked');term.focus()}};
-    const nativePaste=(event:ClipboardEvent)=>{const text=event.clipboardData?.getData('text/plain');if(text){event.preventDefault();pasteText(text)}};
+    const nativePaste=(event:ClipboardEvent)=>{clearTimeout(primaryTimer);const text=event.clipboardData?.getData('text/plain');if(text){event.preventDefault();pasteText(text)}};
     const menuPaste=()=>{void readClipboard()};
     const focusTerminal=()=>term.focus();
-    hostEl.addEventListener('paste',nativePaste);hostEl.addEventListener('ttydterm-paste',menuPaste);hostEl.addEventListener('ttydterm-focus',focusTerminal);
+    const primarySelection=()=>{term.focus();clearTimeout(primaryTimer);primaryTimer=setTimeout(()=>showToast(PRIMARY_SELECTION_HINT),360)};
+    hostEl.addEventListener('paste',nativePaste);hostEl.addEventListener('ttydterm-paste',menuPaste);hostEl.addEventListener('ttydterm-focus',focusTerminal);hostEl.addEventListener('ttydterm-primary-selection',primarySelection);
     term.attachCustomKeyEventHandler((event:KeyboardEvent)=>{if((event.ctrlKey||event.metaKey)&&event.shiftKey&&event.key.toLowerCase()==='v'&&event.type==='keydown'){void readClipboard();return false}return true});
     const selection=term.onSelectionChange(async()=>{const text=term.getSelection();if(!text)return;try{await navigator.clipboard.writeText(text);showToast('Copied')}catch{}});
     const ro=new ResizeObserver(()=>{try{fit.fit()}catch{}});ro.observe(hostEl);client.current={term,fit,socket};
-    return()=>{clearTimeout(toastTimer);hostEl.removeEventListener('paste',nativePaste);hostEl.removeEventListener('ttydterm-paste',menuPaste);hostEl.removeEventListener('ttydterm-focus',focusTerminal);ro.disconnect();input.dispose();resize.dispose();selection.dispose();shellEvents.dispose();socket.close(1000);term.dispose();client.current=null};
-  },[folder.cwd,folder.id,pane.id,pane.command,pane.persist,runtime.mode,runtime.mode==='ttyd'?runtime.token:null,onCommandComplete]);
+    return()=>{clearTimeout(toastTimer);clearTimeout(primaryTimer);hostEl.removeEventListener('paste',nativePaste);hostEl.removeEventListener('ttydterm-paste',menuPaste);hostEl.removeEventListener('ttydterm-focus',focusTerminal);hostEl.removeEventListener('ttydterm-primary-selection',primarySelection);ro.disconnect();input.dispose();resize.dispose();selection.dispose();shellEvents.dispose();socket.close(1000);term.dispose();client.current=null};
+  },[folder.cwd,folder.id,pane.id,pane.command,useTmux,runtime.mode,runtime.mode==='ttyd'?runtime.token:null,onCommandComplete,onOutputActivity]);
 
   useLayoutEffect(()=>{
     if(!host.current||!client.current||appliedAppearance.current===appearanceVersion)return;
@@ -404,7 +439,7 @@ function RealTerminal({ folder, pane, runtime, active, suspended, titleOwner, on
     return()=>{if(appliedTitle.current&&document.title===appliedTitle.current)document.title='ttydterm';appliedTitle.current=''};
   },[titleOwner]);
   useEffect(()=>{if(active&&!suspended)try{client.current?.fit.fit()}catch{}},[active,suspended]);
-  return <div className={'term xterm-term pattern-'+(folder.pattern||'plain')+(pane.persist?' tmux-terminal':'')+' connection-'+state+(suspended?' xterm-suspended':'')} aria-label={'Terminal '+state}><div className="xterm-host" ref={host}/>{state==='ready'?null:<div className="connection-state">{state}</div>}{toast?<div className="copy-toast" role="status">{toast}</div>:null}</div>;
+  return <div className={'term xterm-term pattern-'+(folder.pattern||'plain')+(useTmux?' tmux-terminal':'')+' connection-'+state+(suspended?' xterm-suspended':'')} aria-label={'Terminal '+state}><div className="xterm-host" ref={host}/>{state==='ready'?null:<div className="connection-state">{state}</div>}{toast?<div className="copy-toast" role="status">{toast}</div>:null}</div>;
 }
 
 const DocThemeContext = React.createContext<((folderId: string, theme: string) => void) | null>(null);
@@ -547,20 +582,23 @@ function MockTerminal({ folder, pane, suspended }: {
   );
 }
 
-function Terminal({ folder, pane, runtime, active, suspended, titleOwner, onCommandComplete }: {
+function Terminal({ folder, pane, runtime, active, suspended, titleOwner, useTmux, onCommandComplete, onOutputActivity }: {
   folder: Folder;
   pane: PaneNode;
   runtime: Runtime;
   active: boolean;
   suspended: boolean;
   titleOwner: boolean;
+  useTmux: boolean|null;
   onCommandComplete: (event:CommandCompletion) => void;
+  onOutputActivity: (folderId:string, bytes:number) => void;
 }) {
   const page = folder.doc ? docPage(folder.doc) : null;
   const section = page ? page.sections[pane.docSection ?? 0] : null;
 
   if (page && section) return <DocTerminal folder={folder} page={page} section={section} />;
-  if (!folder.doc && runtime.mode === 'ttyd') return <RealTerminal folder={folder} pane={pane} runtime={runtime} active={active} suspended={suspended} titleOwner={titleOwner} onCommandComplete={onCommandComplete}/>;
+  if (!folder.doc&&runtime.mode==='ttyd'&&useTmux===null)return <div className={'term pattern-'+(folder.pattern||'plain')} aria-label="Terminal waiting for tmux check"><div className="connection-state">Checking for tmux…</div></div>;
+  if (!folder.doc && runtime.mode === 'ttyd'&&useTmux!==null) return <RealTerminal folder={folder} pane={pane} runtime={runtime} active={active} suspended={suspended} titleOwner={titleOwner} useTmux={useTmux} onCommandComplete={onCommandComplete} onOutputActivity={onOutputActivity}/>;
   return <MockTerminal folder={folder} pane={pane} suspended={suspended}/>;
 }
 
@@ -589,8 +627,8 @@ const tmuxState = (capabilities:Capabilities, runtime:Runtime):TmuxState => capa
 type PaneMenu = { source: 'trigger' | 'context'; x: number; y: number };
 interface FocusRequest { id: string; n?: number; nonce?: number }
 
-const Pane=React.memo(function Pane({ node, folder, runtime, active, focused, completed, closing, focusReq, resizing,
-               onFocus, onSplit, onClose, canClose, onOpenSettings, onCommandComplete }: {
+const Pane=React.memo(function Pane({ node, folder, runtime, active, focused, completed, closing, focusReq, resizing, useTmux,
+               onFocus, onSplit, onClose, canClose, onOpenSettings, onOpenWorkspaceSettings, onCommandComplete, onOutputActivity }: {
   node: PaneNode;
   folder: Folder;
   runtime: Runtime;
@@ -600,15 +638,18 @@ const Pane=React.memo(function Pane({ node, folder, runtime, active, focused, co
   closing: boolean;
   focusReq: FocusRequest | null;
   resizing: boolean;
+  useTmux: boolean|null;
   onFocus: (folderId:string,paneId:string) => void;
   onSplit: (folderId:string,paneId:string,axis:SplitAxis,count:number) => void;
   onClose: (paneId: string) => void;
   canClose: boolean;
   onOpenSettings: (folderId:string,paneId:string) => void;
+  onOpenWorkspaceSettings: (folderId:string) => void;
   onCommandComplete: (event:CommandCompletion) => void;
+  onOutputActivity: (folderId:string, bytes:number) => void;
 }) {
   const [menu, setMenu] = useState<PaneMenu | null>(null);
-  const ref = useRef<HTMLDivElement | null>(null);
+  const ref = useRef<HTMLDivElement | null>(null),menuRef=useRef<HTMLDivElement|null>(null);
   const accent = themeOf(folder.theme);
 
   useEffect(() => {
@@ -617,6 +658,16 @@ const Pane=React.memo(function Pane({ node, folder, runtime, active, focused, co
     addEventListener('pointerdown', off);
     return () => removeEventListener('pointerdown', off);
   }, [menu]);
+  useLayoutEffect(()=>{
+    const element=menuRef.current,pane=ref.current;
+    if(!menu||!element||!pane)return;
+    if(menu.source==='context'){
+      const nextX=clamp(menu.x,7,Math.max(7,pane.clientWidth-element.offsetWidth-7));
+      const nextY=clamp(menu.y,7,Math.max(7,pane.clientHeight-element.offsetHeight-7));
+      if(nextX!==menu.x||nextY!==menu.y){setMenu({...menu,x:nextX,y:nextY});return}
+      requestAnimationFrame(()=>element.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus());
+    }
+  },[menu]);
 
 
   useEffect(() => {
@@ -645,7 +696,15 @@ const Pane=React.memo(function Pane({ node, folder, runtime, active, focused, co
       data-pane-id={node.id}
       aria-label={'Terminal' + (completed ? ', ' + completed + ' completed command' + (completed === 1 ? '' : 's') + ' needing attention' : '')}
       tabIndex={-1}
-      onPointerDownCapture={focusPane}
+      onPointerDownCapture={(event:React.PointerEvent<HTMLDivElement>)=>{
+        focusPane();
+        if(useTmux&&event.button===1){
+          event.stopPropagation();
+          ref.current?.querySelector('.xterm-host')?.dispatchEvent(new Event('ttydterm-primary-selection'));
+        }
+      }}
+      onMouseDownCapture={(event:React.MouseEvent<HTMLDivElement>)=>{if(useTmux&&event.button===1)event.stopPropagation()}}
+      onAuxClickCapture={(event:React.MouseEvent<HTMLDivElement>)=>{if(useTmux&&event.button===1)event.stopPropagation()}}
       onFocus={focusPane}
 
       onContextMenu={(e) => {
@@ -655,7 +714,7 @@ const Pane=React.memo(function Pane({ node, folder, runtime, active, focused, co
         setMenu({ source:'context', x:e.clientX-r.left, y:e.clientY-r.top });
       }}
     >
-      <Terminal folder={folder} pane={node} runtime={runtime} active={active} suspended={resizing} titleOwner={active&&focused} onCommandComplete={onCommandComplete} />
+      <Terminal folder={folder} pane={node} runtime={runtime} active={active} suspended={resizing} titleOwner={active&&focused} useTmux={useTmux} onCommandComplete={onCommandComplete} onOutputActivity={onOutputActivity} />
       {completed ? <span className="pane-complete" aria-hidden="true" /> : null}
 
       {}
@@ -664,15 +723,15 @@ const Pane=React.memo(function Pane({ node, folder, runtime, active, focused, co
       {}
       <div className={'pane-hotspot' + (menu ? ' open' : '')} aria-hidden="true" />
       <div className={'rail-pane' + (menu ? ' open' : '')} onPointerDown={(e) => e.stopPropagation()}>
-        <button className={'pico' + (node.persist ? ' persist' : '')}
+        <button className={'pico' + (useTmux ? ' persist' : '')}
                 title="Pane menu" aria-label="Pane menu"
                 aria-expanded={!!menu} aria-haspopup="menu"
                 onClick={(e) => { const x=e.currentTarget.offsetLeft,y=e.currentTarget.offsetTop+28;setMenu((v)=>v?null:{source:'trigger',x,y}); }}><Ico.menu /></button>
       </div>
 
       {menu ? (
-        <div className="panepop" role="menu" tabIndex={-1}
-             style={menu.source === "context" ? { left:`clamp(7px, ${menu.x}px, calc(100% - 100px))`, top:`clamp(7px, ${menu.y}px, calc(100% - 100px))`, right:"auto" } : undefined}
+        <div ref={menuRef} className="panepop" role="menu" tabIndex={-1}
+             style={menu.source === "context" ? {left:menu.x+'px',top:menu.y+'px',right:'auto'} : undefined}
              onPointerDown={(e) => e.stopPropagation()}
              onKeyDown={(e) => {
                const items = [...e.currentTarget.querySelectorAll<HTMLButtonElement>("button:not(:disabled)")];
@@ -680,25 +739,32 @@ const Pane=React.memo(function Pane({ node, folder, runtime, active, focused, co
                if(e.key==="ArrowDown"||e.key==="ArrowRight"){e.preventDefault();items[(i+1+items.length)%items.length]?.focus()}
                else if(e.key==="ArrowUp"||e.key==="ArrowLeft"){e.preventDefault();items[(i-1+items.length)%items.length]?.focus()}
                else if(e.key==="Escape"){e.preventDefault();setMenu(null);focusTerminal()}
-             }}
-             ref={(el: HTMLDivElement | null) => { if(el && menu.source === "context") requestAnimationFrame(()=>el.querySelector("button")?.focus()); }}>
-          <button className="pico" role="menuitem" title="Pane settings" aria-label="Pane settings"
-                  onClick={() => { setMenu(null); onOpenSettings(folder.id,node.id); }}><Ico.gear /></button>
-          <button className="pico" role="menuitem" title="Paste" aria-label="Paste"
-                  onClick={()=>{setMenu(null);ref.current?.querySelector('.xterm-host')?.dispatchEvent(new Event('ttydterm-paste'))}}><Ico.paste /></button>
-          <button className="pico danger row-end" role="menuitem" disabled={!canClose}
-                  title={canClose?'Close pane':'The only pane cannot be closed'} aria-label={canClose?'Close pane':'Close pane unavailable: this is the only pane'}
-                  onClick={() => { if(canClose){setMenu(null);onClose(node.id)} }}><Ico.close /></button>
-          {[2, 3, 4].map((n) => (
-            <button key={'c' + n} className="pico axis-top" role="menuitem"
-                    title={'Split into ' + n + ' columns'} aria-label={'Split into ' + n + ' columns'}
-                    onClick={() => split('columns', n)}><CountGlyph axis="columns" n={n} /></button>
-          ))}
-          {[2, 3, 4].map((n) => (
-            <button key={'r' + n} className="pico" role="menuitem"
-                    title={'Split into ' + n + ' rows'} aria-label={'Split into ' + n + ' rows'}
-                    onClick={() => split('rows', n)}><CountGlyph axis="rows" n={n} /></button>
-          ))}
+             }}>
+          <div className="pane-menu-actions" role="none">
+            <button className="pico" role="menuitem" title="Pane settings" aria-label="Pane settings"
+                    onClick={() => { setMenu(null); onOpenSettings(folder.id,node.id); }}><Ico.gear /></button>
+            <button className="pico" role="menuitem" title="Paste" aria-label="Paste"
+                    onClick={()=>{setMenu(null);ref.current?.querySelector('.xterm-host')?.dispatchEvent(new Event('ttydterm-paste'))}}><Ico.paste /></button>
+            <button className="pico" role="menuitem" title="Workspace appearance" aria-label="Workspace appearance"
+                    onClick={()=>{setMenu(null);onOpenWorkspaceSettings(folder.id)}}><WsIcon name="palette" /></button>
+            <button className="pico danger" role="menuitem" disabled={!canClose}
+                    title={canClose?'Close pane':'The only pane cannot be closed'} aria-label={canClose?'Close pane':'Close pane unavailable: this is the only pane'}
+                    onClick={() => { if(canClose){setMenu(null);onClose(node.id)} }}><Ico.close /></button>
+          </div>
+          <div className="pane-menu-splits axis-top" role="none">
+            {[2, 3, 4].map((n) => (
+              <button key={'c' + n} className="pico" role="menuitem"
+                      title={'Split into ' + n + ' columns'} aria-label={'Split into ' + n + ' columns'}
+                      onClick={() => split('columns', n)}><CountGlyph axis="columns" n={n} /></button>
+            ))}
+          </div>
+          <div className="pane-menu-splits" role="none">
+            {[2, 3, 4].map((n) => (
+              <button key={'r' + n} className="pico" role="menuitem"
+                      title={'Split into ' + n + ' rows'} aria-label={'Split into ' + n + ' rows'}
+                      onClick={() => split('rows', n)}><CountGlyph axis="rows" n={n} /></button>
+            ))}
+          </div>
         </div>
       ) : null}
     </div>
@@ -715,6 +781,7 @@ interface NodeProps {
   focusReq: FocusRequest | null;
   completedByPane: Record<string,number>;
   resizing: boolean;
+  useTmux: boolean|null;
   onResizeStart: () => void;
   onResizeEnd: () => void;
   onFocus: (folderId:string,paneId:string) => void;
@@ -723,21 +790,23 @@ interface NodeProps {
   canClose: boolean;
   onResize: (folderId:string,path:number[],sizes:number[]) => void;
   onOpenSettings: (folderId:string,paneId:string) => void;
+  onOpenWorkspaceSettings: (folderId:string) => void;
   onCommandComplete: (event:CommandCompletion) => void;
+  onOutputActivity: (folderId:string, bytes:number) => void;
   path: number[];
 }
 
-function Node({ node, folder, runtime, active, focusId, closingId, focusReq, completedByPane, resizing, onResizeStart, onResizeEnd,
-               onFocus, onSplit, onClose, canClose, onResize, onOpenSettings, onCommandComplete, path }: NodeProps) {
+function Node({ node, folder, runtime, active, focusId, closingId, focusReq, completedByPane, resizing, useTmux, onResizeStart, onResizeEnd,
+               onFocus, onSplit, onClose, canClose, onResize, onOpenSettings, onOpenWorkspaceSettings, onCommandComplete, onOutputActivity, path }: NodeProps) {
   const ref = useRef<HTMLDivElement | null>(null);
 
   if (node.type === 'pane') {
     const leaf = node;
     return (
       <Pane node={leaf} folder={folder} runtime={runtime} active={active} focused={focusId === leaf.id} completed={completedByPane[leaf.id] || 0} closing={closingId === leaf.id}
-            focusReq={focusReq?.id===leaf.id?focusReq:null} resizing={resizing}
+            focusReq={focusReq?.id===leaf.id?focusReq:null} resizing={resizing} useTmux={useTmux}
             onFocus={onFocus} onSplit={onSplit} onClose={onClose} canClose={canClose}
-            onOpenSettings={onOpenSettings} onCommandComplete={onCommandComplete} />
+            onOpenSettings={onOpenSettings} onOpenWorkspaceSettings={onOpenWorkspaceSettings} onCommandComplete={onCommandComplete} onOutputActivity={onOutputActivity} />
     );
   }
 
@@ -817,9 +886,9 @@ function Node({ node, folder, runtime, active, focusId, closingId, focusReq, com
           ) : null}
           <div className="slot" style={{ flexBasis: 'calc((100% - ' + gaps + 'px) * ' + node.sizes[i] + ')' }}>
             <Node node={child} folder={folder} runtime={runtime} active={active} focusId={focusId} closingId={closingId} focusReq={focusReq}
-                  completedByPane={completedByPane} resizing={resizing} onResizeStart={onResizeStart} onResizeEnd={onResizeEnd}
+                  completedByPane={completedByPane} resizing={resizing} useTmux={useTmux} onResizeStart={onResizeStart} onResizeEnd={onResizeEnd}
                   onFocus={onFocus} onSplit={onSplit} onClose={onClose} canClose={canClose}
-                  onResize={onResize} onOpenSettings={onOpenSettings} onCommandComplete={onCommandComplete} path={path.concat(i)} />
+                  onResize={onResize} onOpenSettings={onOpenSettings} onOpenWorkspaceSettings={onOpenWorkspaceSettings} onCommandComplete={onCommandComplete} onOutputActivity={onOutputActivity} path={path.concat(i)} />
           </div>
         </React.Fragment>
       ))}
@@ -827,8 +896,8 @@ function Node({ node, folder, runtime, active, focusId, closingId, focusReq, com
   );
 }
 
-function Surface({ folder, runtime, active, focusId, closingId, focusReq, completedByPane, appResizing,
-                   onFocus, onSplit, onClose, onResize, onAddFirst, onOpenSettings, onCommandComplete }: {
+function Surface({ folder, runtime, active, focusId, closingId, focusReq, completedByPane, appResizing, useTmux, fontSize,
+                   onFocus, onSplit, onClose, onResize, onAddFirst, onOpenSettings, onOpenWorkspaceSettings, onCommandComplete, onOutputActivity }: {
   folder: Folder;
   runtime: Runtime;
   active: boolean;
@@ -837,13 +906,17 @@ function Surface({ folder, runtime, active, focusId, closingId, focusReq, comple
   focusReq: FocusRequest | null;
   completedByPane: Record<string,number>;
   appResizing: boolean;
+  useTmux: boolean|null;
+  fontSize: number;
   onFocus: (folderId:string,paneId:string) => void;
   onSplit: (folderId:string,paneId:string,axis:SplitAxis,count:number) => void;
   onClose: (paneId: string) => void;
   onResize: (folderId:string,path:number[],sizes:number[]) => void;
   onAddFirst: (folderId:string) => void;
   onOpenSettings: (folderId:string,paneId:string) => void;
+  onOpenWorkspaceSettings: (folderId:string) => void;
   onCommandComplete: (event:CommandCompletion) => void;
+  onOutputActivity: (folderId:string, bytes:number) => void;
 }) {
   const viewport = useRef<HTMLDivElement | null>(null);
   const [box, setBox] = useState({ w: 0, h: 0 });
@@ -865,7 +938,7 @@ function Surface({ folder, runtime, active, focusId, closingId, focusReq, comple
   const startResizing=useCallback(()=>setResizing(true),[]),endResizing=useCallback(()=>setResizing(false),[]);
 
   return (
-    <div className="surface" hidden={!active}>
+    <div className="surface" hidden={!active} style={{'--term-font-size':fontSize+'px'}}>
       <div className="viewport" ref={viewport}>
         {folder.layout ? (
           <div className="canvas" style={{
@@ -873,10 +946,10 @@ function Surface({ folder, runtime, active, focusId, closingId, focusReq, comple
             height: Math.max(box.h, Math.ceil(min.h)),
           }}>
             <Node node={folder.layout} folder={folder} runtime={runtime} active={active} focusId={focusId} closingId={closingId} focusReq={focusReq}
-                  completedByPane={completedByPane} resizing={resizing || appResizing}
+                  completedByPane={completedByPane} resizing={resizing || appResizing} useTmux={useTmux}
                   onResizeStart={startResizing} onResizeEnd={endResizing}
                   onFocus={onFocus} onSplit={onSplit} onClose={onClose} canClose={canClose}
-                  onResize={onResize} onOpenSettings={onOpenSettings} onCommandComplete={onCommandComplete} path={[]} />
+                  onResize={onResize} onOpenSettings={onOpenSettings} onOpenWorkspaceSettings={onOpenWorkspaceSettings} onCommandComplete={onCommandComplete} onOutputActivity={onOutputActivity} path={[]} />
           </div>
         ) : (
           <div className="empty-add">
@@ -955,26 +1028,18 @@ function TmuxStatusHint({ tmux, present, absent, onCheck }: {
   return <>{text}{onCheck&&tmux.state!=='present'&&tmux.state!=='probing' ? <button type="button" className="hint-action" onClick={onCheck}>Check again</button> : null}</>;
 }
 
-function FolderDialog({ folder, isNew, tmux, onCheckTmux, onChange, onCreate, onDelete, onClose, canDelete }: {
+function FolderDialog({ folder, isNew, globalFontSize, onChange, onCreate, onDelete, onClose, canDelete }: {
   folder: Folder;
   isNew?: boolean;
-  tmux?: TmuxState;
-  onCheckTmux?:()=>void;
+  globalFontSize: number;
   onChange?: (patch: Partial<Folder>) => void;
-  onCreate?: (folder: Folder, persist: boolean) => void;
+  onCreate?: (folder: Folder) => void;
   onDelete?: () => void;
   onClose: () => void;
   canDelete?: boolean;
 }) {
   const [draft, setDraft] = useState<Folder>(folder);
-  const [persist,setPersist]=useState(tmux?.state === 'present');
-  const persistTouched=useRef(false);
   useEffect(() => setDraft(folder), [folder]);
-  useEffect(()=>{
-    if(!isNew||persistTouched.current)return;
-    if(tmux?.state==='present')setPersist(true);
-    else if(tmux?.state==='absent')setPersist(false);
-  },[isNew,tmux?.state]);
   const put = (patch: Partial<Folder>) => { setDraft((d) => ({ ...d, ...patch })); if (!isNew) onChange?.(patch); };
   const nameId = useId(), cwdId = useId();
   const label = draft.name.trim() || draft.cwd.split('/').filter((s) => s && s !== '~').pop() || 'workspace';
@@ -982,15 +1047,15 @@ function FolderDialog({ folder, isNew, tmux, onCheckTmux, onChange, onCreate, on
   return (
     <ModalForm
       variant="folder-dialog"
-      title={isNew ? 'New folder' : 'Folder'}
+      title={isNew ? 'New workspace' : 'Workspace'}
       onClose={onClose}
-      closeLabel={isNew ? 'Close new folder' : 'Close folder settings'}
+      closeLabel={isNew ? 'Close new workspace' : 'Close workspace settings'}
       actions={
         <ModalActions
-          destructive={!isNew && canDelete ? <Button kind="danger" onClick={onDelete}>Delete folder</Button> : null}
+          destructive={!isNew && canDelete ? <Button kind="danger" onClick={onDelete}>Delete workspace</Button> : null}
           secondary={isNew ? <Button onClick={onClose}>Cancel</Button> : null}
           primary={isNew
-            ? <Button kind="primary" onClick={() => onCreate?.({ ...draft, name: draft.name.trim(), cwd: draft.cwd.trim() || '~' }, persist)}>Create</Button>
+            ? <Button kind="primary" onClick={() => onCreate?.({ ...draft, name: draft.name.trim(), cwd: draft.cwd.trim() || '~' })}>Create</Button>
 
             : <Button kind="primary" onClick={onClose}>Done</Button>}
         />
@@ -1021,17 +1086,15 @@ function FolderDialog({ folder, isNew, tmux, onCheckTmux, onChange, onCreate, on
           </div>
         )}
       </FieldGroup>
-      {isNew && tmux ? <CheckboxField
-        label="Keep the first terminal alive with tmux"
-        checked={persist}
-        disabled={tmux.state !== 'present'}
-        onChange={(checked)=>{persistTouched.current=true;setPersist(checked)}}
-        hintTone={tmux.state === 'absent'||tmux.state === 'error' ? 'warn' : 'default'}
-        hint={<TmuxStatusHint tmux={tmux} onCheck={onCheckTmux}
-          present="Installed and enabled by default. Uncheck to opt out."
-          absent="tmux is not in the PATH used by ttyd’s login shell. This terminal dies with the tab." />}
-      /> : null}
       <ThemeChoice label="Theme" value={draft.theme || 'paper'} onChange={(theme) => put({ theme: theme || 'paper' })} />
+      <FieldGroup label="Terminal font size">
+        {(labelledBy)=><div className="font-groups workspace-fonts" role="radiogroup" aria-labelledby={labelledBy}>
+          <button type="button" role="radio" aria-checked={draft.fontSize===undefined}
+                  className={draft.fontSize===undefined?'on':''} onClick={()=>put({fontSize:undefined})}>Global · {globalFontSize}</button>
+          {FONT_SIZES.map((size)=><button key={size} type="button" role="radio" aria-checked={draft.fontSize===size}
+                  className={draft.fontSize===size?'on':''} style={{fontSize:size+'px'}} onClick={()=>put({fontSize:size})}>{size}</button>)}
+        </div>}
+      </FieldGroup>
       <FieldGroup label="Terminal pattern">
         {(labelledBy) => (
           <div className="pattern-choices" role="radiogroup" aria-labelledby={labelledBy}>
@@ -1047,11 +1110,9 @@ function FolderDialog({ folder, isNew, tmux, onCheckTmux, onChange, onCreate, on
   );
 }
 
-function PaneSettings({ node, folder, tmux, onCheckTmux, onChange, onClose }: {
+function PaneSettings({ node, folder, onChange, onClose }: {
   node: PaneNode;
   folder: Folder;
-  tmux: TmuxState;
-  onCheckTmux?:()=>void;
   onChange: (patch: Partial<PaneNode>) => void;
   onClose: () => void;
 }) {
@@ -1084,16 +1145,6 @@ function PaneSettings({ node, folder, tmux, onCheckTmux, onChange, onClose }: {
                onBlur={commitCommand}
                onKeyDown={(e)=>{if(e.key==='Enter'){e.preventDefault();commitCommand()}}} />
       </Field>
-      <CheckboxField
-        label="Run in tmux"
-        checked={node.persist}
-        disabled={tmux.state !== 'present'}
-        onChange={(persist) => onChange({ persist })}
-        hintTone={tmux.state === 'absent'||tmux.state === 'error' ? 'warn' : 'default'}
-        hint={<TmuxStatusHint tmux={tmux} onCheck={onCheckTmux}
-          present="Survives closing the tab."
-          absent="tmux is not in the PATH used by ttyd’s login shell. This pane dies with the tab." />}
-      />
     </ModalForm>
   );
 }
@@ -1106,11 +1157,11 @@ function SetupNotice({mode,onRetry}: {mode: Runtime['mode']; onRetry: () => void
 function FirstRunDialog({ capabilities, onProbe, onCreate }: {
   capabilities: Capabilities;
   onProbe: () => void;
-  onCreate: (cwd: string, name: string, persist: boolean) => void;
+  onCreate: (cwd: string, name: string) => void;
 }) {
-  const [cwd,setCwd]=useState('~'),[name,setName]=useState('home'),[persist,setPersist]=useState(false);
+  const [cwd,setCwd]=useState('~'),[name,setName]=useState('home');
   const cwdId = useId(), nameId = useId();
-  useEffect(()=>{if(capabilities.state==='ready'){setCwd(capabilities.cwd||capabilities.home||'~');setName((capabilities.cwd||'home').split('/').filter(Boolean).pop()||'home');setPersist(!!capabilities.tmux)}},[capabilities.state]);
+  useEffect(()=>{if(capabilities.state==='ready'){setCwd(capabilities.cwd||capabilities.home||'~');setName((capabilities.cwd||'home').split('/').filter(Boolean).pop()||'home')}},[capabilities.state]);
   return (
 
     <ModalForm variant="first-run" title="Welcome to ttydterm"
@@ -1120,7 +1171,7 @@ function FirstRunDialog({ capabilities, onProbe, onCreate }: {
                    destructive={<Button disabled={capabilities.state === 'probing'} onClick={onProbe}>
                      {capabilities.state === 'probing' ? 'Checking…' : 'Check environment'}
                    </Button>}
-                   primary={<Button kind="primary" onClick={() => onCreate(cwd || '~', name.trim(), persist)}>Create workspace</Button>}
+                   primary={<Button kind="primary" onClick={() => onCreate(cwd || '~', name.trim())}>Create workspace</Button>}
                  />
                }>
       <Field label="Working directory" htmlFor={cwdId}>
@@ -1129,14 +1180,6 @@ function FirstRunDialog({ capabilities, onProbe, onCreate }: {
       <Field label="Optional name" htmlFor={nameId}>
         <input id={nameId} value={name} onChange={(e) => setName(e.target.value)} />
       </Field>
-      <CheckboxField
-        label={'Keep panes alive with tmux ' + (capabilities.state === 'unknown' ? '(check environment first)'
-          : capabilities.state === 'probing' ? '(checking)'
-          : capabilities.state === 'error' ? '(check failed)'
-          : capabilities.tmux ? '(installed)' : '(not found)')}
-        checked={persist} disabled={!capabilities.tmux} onChange={setPersist}
-        hint={capabilities.error} hintTone={capabilities.error ? 'warn' : 'default'}
-      />
     </ModalForm>
   );
 }
@@ -1145,23 +1188,24 @@ type NotificationPermissionState = NotificationPermission | 'unsupported';
 const notificationPermission = ():NotificationPermissionState =>
   typeof Notification === 'undefined' || !isSecureContext ? 'unsupported' : Notification.permission;
 
-function GlobalSettings({ theme, fontSize, fontWeight, notifyOnCommandFinish, notificationState,
-                          onTheme, onFontSize, onFontWeight, onNotifications, onClose }: {
-  theme: string;
+function GlobalSettings({ fontSize, fontWeight, useTmux, tmux, notifyOnCommandFinish, notificationState,
+                          onFontSize, onFontWeight, onTmux, onCheckTmux, onNotifications, onClose }: {
   fontSize: number;
   fontWeight: FontWeight;
+  useTmux:boolean;
+  tmux:TmuxState;
   notifyOnCommandFinish:boolean;
   notificationState:NotificationPermissionState;
-  onTheme: (theme: string) => void;
   onFontSize: (size: number) => void;
   onFontWeight: (weight:FontWeight) => void;
+  onTmux:(enabled:boolean)=>void;
+  onCheckTmux?:()=>void;
   onNotifications:(enabled:boolean)=>void;
   onClose: () => void;
 }) {
   return (
     <ModalForm variant="global-settings" title="Global settings" onClose={onClose} closeLabel="Close global settings"
                actions={<ModalActions primary={<Button kind="primary" onClick={onClose}>Done</Button>} />}>
-      <ThemeChoice label="Theme" value={theme} onChange={(t) => onTheme(t || 'night')} />
       <FieldGroup label="Terminal font size">
         {(labelledBy) => (
           <div className="font-groups" role="radiogroup" aria-labelledby={labelledBy}>
@@ -1177,6 +1221,16 @@ function GlobalSettings({ theme, fontSize, fontWeight, notifyOnCommandFinish, no
       <FieldGroup label="Terminal font weight">
         {(labelledBy)=><div className="weight-groups" role="radiogroup" aria-labelledby={labelledBy}>{FONT_WEIGHTS.map(({key,label,value})=><button key={key} type="button" role="radio" aria-checked={fontWeight===key} className={fontWeight===key?'on':''} style={{fontWeight:value}} onClick={()=>onFontWeight(key)}>{label}</button>)}</div>}
       </FieldGroup>
+      <CheckboxField
+        label="Use tmux when available"
+        checked={useTmux}
+        disabled={tmux.state==='probing'}
+        onChange={onTmux}
+        hintTone={tmux.state==='absent'||tmux.state==='error'?'warn':'default'}
+        hint={<TmuxStatusHint tmux={tmux} onCheck={onCheckTmux}
+          present="Changing this restarts every terminal. tmux keeps them alive after the browser closes."
+          absent="tmux is unavailable in the PATH used by ttyd’s login shell. Terminals run without it." />}
+      />
       <CheckboxField
         label="Notify when commands finish"
         checked={notifyOnCommandFinish}
@@ -1224,7 +1278,7 @@ function BackupDialog({ config, onRestore, onClose }: {
                    primary={<Button kind="primary" onClick={restore}>Restore</Button>}
                  />
                }>
-      <Field label="The entire workspace: folders, panes, splits, sizes, themes, sidebar width"
+      <Field label="The entire workspace: workspaces, panes, splits, sizes, themes, sidebar width"
              htmlFor={taId}
              hintTone={msg && !msg.ok ? 'error' : 'default'}
              hint={msg ? msg.text : 'Paste a saved copy over this and press Restore.'}>
@@ -1318,7 +1372,6 @@ function CommandPalette({ folders, activeId, onPick, onClose, inputRef }: {
                   </span>
                   <span className="pal-sub">{r.sub}</span>
                 </span>
-                {r.kind === 'pane' && r.pane?.persist ? <span className="pal-dot" title="stays alive in the background" /> : null}
               </button>
             );
           })}
@@ -1343,33 +1396,59 @@ function ShortcutsDialog({onClose}:{onClose:()=>void}) {
   return <ModalForm variant="shortcuts-dialog" title="Keyboard shortcuts" onClose={onClose}>{groups.map(([title,items])=><section key={title} className="shortcut-group"><h3>{title}</h3>{items.map(([keys,label])=><div key={keys} className="shortcut-row"><kbd>{keys}</kbd><span>{label}</span></div>)}</section>)}</ModalForm>;
 }
 
-function FolderRow({folder,compact,index,active,canRemove,completedByPane,onFocus,onRemove}:{
-  folder:Folder;compact:boolean;index:number;active:boolean;canRemove:boolean;
-  completedByPane:Record<string,number>;onFocus:(folder:Folder)=>void;onRemove:(id:string)=>void;
+type FolderMenuState={source:'trigger'|'context';x:number;y:number};
+function FolderRow({folder,compact,index,count,active,activity,canRemove,completedByPane,onFocus,onRemove,onMove}:{
+  folder:Folder;compact:boolean;index:number;count:number;active:boolean;activity:number;canRemove:boolean;
+  completedByPane:Record<string,number>;onFocus:(folder:Folder)=>void;onRemove:(id:string)=>void;onMove:(id:string,targetIndex:number)=>void;
 }){
   const label=folderLabel(folder),completed=listPanes(folder.layout).reduce((sum,pane)=>sum+(completedByPane[pane.id]||0),0);
-  const [open,setOpen]=useState(false);
-  const trigger=useRef<HTMLButtonElement|null>(null);
-  useEffect(()=>{if(!open)return;const close=()=>setOpen(false);addEventListener('pointerdown',close);return()=>removeEventListener('pointerdown',close)},[open]);
-  const closeToTrigger=()=>{setOpen(false);requestAnimationFrame(()=>trigger.current?.focus())};
-  return <div className={'folder'+(active?' active':'')} title={label+(index<9?': Alt+'+(index+1):'')}>
-    <button type="button" className="folder-main" aria-current={active?'true':undefined}
+  const [menu,setMenu]=useState<FolderMenuState|null>(null);
+  const trigger=useRef<HTMLButtonElement|null>(null),main=useRef<HTMLButtonElement|null>(null),menuRef=useRef<HTMLSpanElement|null>(null);
+  useEffect(()=>{if(!menu)return;const close=()=>setMenu(null);addEventListener('pointerdown',close);return()=>removeEventListener('pointerdown',close)},[menu]);
+  useLayoutEffect(()=>{
+    const element=menuRef.current;if(!menu||!element)return;
+    const nextX=clamp(menu.x,6,Math.max(6,innerWidth-element.offsetWidth-6));
+    const nextY=clamp(menu.y,6,Math.max(6,innerHeight-element.offsetHeight-6));
+    if(nextX!==menu.x||nextY!==menu.y){setMenu({...menu,x:nextX,y:nextY});return}
+    requestAnimationFrame(()=>element.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus());
+  },[menu]);
+  const closeToSource=()=>{const source=menu?.source;(source==='trigger'?trigger.current:main.current)?.focus();setMenu(null)};
+  const menuKeys=(event:React.KeyboardEvent<HTMLSpanElement>)=>{
+    const items=[...event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')],at=items.indexOf(document.activeElement as HTMLButtonElement);
+    if(event.key==='ArrowDown'||event.key==='ArrowRight'){event.preventDefault();items[(at+1+items.length)%items.length]?.focus()}
+    else if(event.key==='ArrowUp'||event.key==='ArrowLeft'){event.preventDefault();items[(at-1+items.length)%items.length]?.focus()}
+    else if(event.key==='Escape'){event.preventDefault();event.stopPropagation();closeToSource()}
+  };
+  return <div className={'folder'+(active?' active':'')+(activity?' activity-'+activity:'')} title={label+(index<9?': Alt+'+(index+1):'')}
+              onDragOver={(event:React.DragEvent<HTMLDivElement>)=>{if(event.dataTransfer.types.includes('application/x-ttydterm-workspace')){event.preventDefault();event.currentTarget.classList.add('drop-target')}}}
+              onDragLeave={(event:React.DragEvent<HTMLDivElement>)=>event.currentTarget.classList.remove('drop-target')}
+              onDrop={(event:React.DragEvent<HTMLDivElement>)=>{event.currentTarget.classList.remove('drop-target');const id=event.dataTransfer.getData('application/x-ttydterm-workspace');if(id){event.preventDefault();onMove(id,index)}}}
+              onContextMenu={(event:React.MouseEvent<HTMLDivElement>)=>{event.preventDefault();event.stopPropagation();setMenu({source:'context',x:event.clientX,y:event.clientY})}}>
+    {activity?<span className="folder-activity" aria-hidden="true"/>:null}
+    <button ref={main} type="button" className="folder-main" aria-current={active?'true':undefined}
             aria-keyshortcuts={index<9?'Alt+'+(index+1):undefined}
-            aria-label={(compact?label:'Workspace '+label)+(completed?', '+completed+' completed command'+(completed===1?'':'s'):'')+(index<9?', Alt+'+(index+1):'')}
+            aria-label={(compact?label:'Workspace '+label)+', position '+(index+1)+' of '+count+(completed?', '+completed+' completed command'+(completed===1?'':'s'):'')+(index<9?', Alt+'+(index+1):'')}
             onClick={()=>onFocus(folder)} onDoubleClick={()=>go('f',folder.id,'settings')}>
-      <span className="folder-badge">{folder.icon?<WsIcon name={folder.icon}/>:initials(label)}</span>
+      <span className="folder-badge" draggable="true" title={'Drag to reorder '+label}
+            onDragStart={(event:React.DragEvent<HTMLSpanElement>)=>{event.dataTransfer.effectAllowed='move';event.dataTransfer.setData('application/x-ttydterm-workspace',folder.id);event.currentTarget.closest('.folder')?.classList.add('dragging')}}
+            onDragEnd={(event:React.DragEvent<HTMLSpanElement>)=>{event.currentTarget.closest('.folder')?.classList.remove('dragging');document.querySelectorAll('.folder.drop-target').forEach((row)=>row.classList.remove('drop-target'))}}>
+        {folder.icon?<WsIcon name={folder.icon}/>:initials(label)}
+      </span>
       {compact?null:<span className="folder-name">{label}</span>}
       {completed?<span className="folder-complete" aria-hidden="true"/>:null}
     </button>
-    {compact?null:<span className={'folder-actions'+(open?' open':'')} onPointerDown={(event)=>event.stopPropagation()}
-      onKeyDown={(event)=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();closeToTrigger()}}}>
+    {compact?null:<span className={'folder-actions'+(menu?' open':'')} onPointerDown={(event)=>event.stopPropagation()}
+      onKeyDown={(event)=>{if(event.key==='Escape'&&menu){event.preventDefault();event.stopPropagation();closeToSource()}}}>
       <button ref={trigger} className="folder-act" title={'Workspace menu: '+label} aria-label={'Workspace menu for '+label}
-              aria-haspopup="menu" aria-expanded={open} onClick={(event)=>{event.stopPropagation();setOpen((value)=>!value)}}><Ico.menu/></button>
-      {open?<span className="folder-menu" role="menu">
-        <button role="menuitem" onClick={(event)=>{event.stopPropagation();setOpen(false);go('f',folder.id,'settings')}}><Ico.gear/><span>Settings</span></button>
-        {canRemove?<button className="danger" role="menuitem" onClick={(event)=>{event.stopPropagation();setOpen(false);onRemove(folder.id)}}><Ico.close/><span>Close</span></button>:null}
-      </span>:null}
+              aria-haspopup="menu" aria-expanded={!!menu} onClick={(event)=>{event.stopPropagation();const r=event.currentTarget.getBoundingClientRect();setMenu((value)=>value?null:{source:'trigger',x:r.right,y:r.bottom})}}><Ico.menu/></button>
     </span>}
+    {menu?<span ref={menuRef} className="folder-menu fixed" role="menu" style={{left:menu.x+'px',top:menu.y+'px'}}
+      onPointerDown={(event)=>event.stopPropagation()} onKeyDown={menuKeys}>
+      <button role="menuitem" disabled={index===0} onClick={(event)=>{event.stopPropagation();setMenu(null);onMove(folder.id,index-1);requestAnimationFrame(()=>main.current?.focus())}}><span aria-hidden="true">↑</span><span>Move up</span></button>
+      <button role="menuitem" disabled={index===count-1} onClick={(event)=>{event.stopPropagation();setMenu(null);onMove(folder.id,index+1);requestAnimationFrame(()=>main.current?.focus())}}><span aria-hidden="true">↓</span><span>Move down</span></button>
+      <button role="menuitem" onClick={(event)=>{event.stopPropagation();setMenu(null);go('f',folder.id,'settings')}}><Ico.gear/><span>Settings</span></button>
+      {canRemove?<button className="danger" role="menuitem" onClick={(event)=>{event.stopPropagation();setMenu(null);onRemove(folder.id)}}><Ico.close/><span>Close</span></button>:null}
+    </span>:null}
   </div>;
 }
 
@@ -1388,16 +1467,28 @@ function App() {
   const [appResizing, setAppResizing] = useState(false);
   const [lastPaneByFolder,setLastPaneByFolder]=useState<Record<string,string>>({});
   const [completedByPane,setCompletedByPane]=useState<Record<string,number>>({});
+  const [activityByFolder,setActivityByFolder]=useState<Record<string,number>>({});
+  const activityEnergy=useRef<Record<string,number>>({});
+  const activityBytes=useRef<Record<string,number>>({});
   const [notificationState,setNotificationState]=useState<NotificationPermissionState>(notificationPermission);
   const paletteInputRef=useRef<HTMLInputElement|null>(null);
   const route = useRoute();
   const tmux = tmuxState(capabilities,runtime);
+  const knownTmux=useRef<boolean|null>(capabilities.state==='ready'?capabilities.tmux:null);
+  if(capabilities.state==='ready')knownTmux.current=capabilities.tmux;
+  else if(capabilities.state==='error'&&knownTmux.current===null)knownTmux.current=false;
 
   const ui = config.ui;
+  const effectiveTmux=ui.useTmux?(tmux.state==='present'?true:tmux.state==='absent'?false:knownTmux.current):false;
   const [narrowViewport,setNarrowViewport]=useState(()=>matchMedia('(max-width: 720px)').matches);
   const [narrowRailOpen,setNarrowRailOpen]=useState(false);
   const railOpen = narrowViewport ? narrowRailOpen : ui.railOpen;
   const setUi = useCallback((patch: Partial<UiState>) => setConfig((c) => ({ ...c, ui: { ...c.ui, ...patch } })), []);
+  const setTmuxPolicy=useCallback((useTmux:boolean)=>setConfig((current)=>({
+    ...current,ui:{...current.ui,useTmux},folders:current.folders.map((folder)=>({
+      ...folder,layout:mapTree(folder.layout,(node)=>node.type==='pane'?{...node,persist:useTmux}:node),
+    })),
+  })),[]);
   const setRailOpen = useCallback((value: boolean | ((previous:boolean)=>boolean)) => {
     const next=typeof value==='function'?value(railOpen):value;
     if(narrowViewport)setNarrowRailOpen(next);
@@ -1406,14 +1497,32 @@ function App() {
 
   const checkCapabilities=useCallback(()=>{
     if(runtime.mode!=='ttyd')return;
-    setCapabilities({state:'probing',tmux:false,home:'~',cwd:'~'});
+    setCapabilities((current)=>({state:'probing',tmux:current.tmux,home:current.home,cwd:current.cwd}));
     probeCapabilities(runtime).then(setCapabilities).catch((error:unknown)=>setCapabilities({state:'error',tmux:false,home:'~',cwd:'~',error:error instanceof Error?error.message:String(error)}));
   },[runtime]);
   useEffect(() => { detectRuntime().then(setRuntime); }, []);
   useEffect(()=>{if(runtime.mode==='ttyd'&&capabilities.state==='unknown')checkCapabilities()},[runtime,capabilities.state,checkCapabilities]);
   useEffect(() => { if(configured) localStorage.setItem(STORE_KEY, JSON.stringify(config)); }, [config, configured]);
+  const onOutputActivity=useCallback((folderId:string,bytes:number)=>{activityBytes.current[folderId]=(activityBytes.current[folderId]||0)+bytes},[]);
+  useEffect(()=>{
+    const timer=setInterval(()=>{
+      const ids=new Set([...Object.keys(activityEnergy.current),...Object.keys(activityBytes.current)]),levels:Record<string,number>={};
+      for(const id of ids){
+        const next=Math.min(ACTIVITY_REFERENCE,(activityEnergy.current[id]||0)*ACTIVITY_DECAY+(activityBytes.current[id]||0));delete activityBytes.current[id];
+        if(next>=ACTIVITY_FLOOR){activityEnergy.current[id]=next;levels[id]=activityLevel(next)}else delete activityEnergy.current[id];
+      }
+      setActivityByFolder((current)=>{const keys=new Set([...Object.keys(current),...Object.keys(levels)]);return [...keys].every((key)=>current[key]===levels[key])?current:levels});
+    },ACTIVITY_TICK_MS);
+    return()=>clearInterval(timer);
+  },[]);
 
   const folders = config.folders;
+  useEffect(()=>{
+    const live=new Set(folders.map((folder)=>folder.id));
+    for(const id of Object.keys(activityEnergy.current))if(!live.has(id))delete activityEnergy.current[id];
+    for(const id of Object.keys(activityBytes.current))if(!live.has(id))delete activityBytes.current[id];
+    setActivityByFolder((current)=>{const next=Object.fromEntries(Object.entries(current).filter(([id])=>live.has(id)));return Object.keys(next).length===Object.keys(current).length?current:next});
+  },[folders]);
   const routedId = route[0] === 'f' ? route[1] : null;
 
 
@@ -1522,8 +1631,8 @@ function App() {
   }, [patchFolder]);
 
   const onSplit=useCallback((folderId:string,paneId:string,axis:SplitAxis,count:number)=>{
-    patchFolder(folderId,(folder)=>({...folder,layout:splitPane(folder.layout,paneId,axis,count,tmux.state==='present')}));
-  },[patchFolder,tmux.state]);
+    patchFolder(folderId,(folder)=>({...folder,layout:splitPane(folder.layout,paneId,axis,count,ui.useTmux)}));
+  },[patchFolder,ui.useTmux]);
 
 
   const commitClose = useCallback(() => {
@@ -1549,8 +1658,15 @@ function App() {
   },[patchFolder]);
 
   const addFirstPane=useCallback((folderId:string)=>{
-    patchFolder(folderId,(folder)=>({...folder,layout:pane('bash',tmux.state==='present')}));
-  },[patchFolder,tmux.state]);
+    patchFolder(folderId,(folder)=>({...folder,layout:pane('bash',ui.useTmux)}));
+  },[patchFolder,ui.useTmux]);
+
+  const moveFolder=useCallback((id:string,targetIndex:number)=>setConfig((current)=>{
+    const source=current.folders.findIndex((folder)=>folder.id===id);
+    if(source<0||targetIndex<0||targetIndex>=current.folders.length||source===targetIndex)return current;
+    const folders=current.folders.slice(),[folder]=folders.splice(source,1);folders.splice(targetIndex,0,folder);
+    return {...current,folders};
+  }),[]);
 
   const removeFolder = useCallback((id: string) => {
     setConfig((c) => {
@@ -1611,6 +1727,7 @@ function App() {
     clearCompleted(paneId);setFocusId(paneId);setLastPaneByFolder((current)=>({...current,[folderId]:paneId}));
   },[clearCompleted]);
   const openPaneSettings=useCallback((folderId:string,paneId:string)=>go('f',folderId,'pane',paneId),[]);
+  const openWorkspaceSettings=useCallback((folderId:string)=>go('f',folderId,'settings'),[]);
 
   const onPaneChange = useCallback((paneId: string, patch: Partial<PaneNode>) => {
     patchFolder(active.id, (f) => ({
@@ -1635,26 +1752,22 @@ function App() {
            style={{ flexBasis: (railOpen ? ui.railWidth : RAIL_COLLAPSED) + 'px' }}>
         {}
         <div className="rail-head">
-          {railOpen ? (
-
-            <span className="brand-block">
-              <span className="brand-name">ttydterm</span>
-              <span className="brand-version" aria-label={'version ' + APP_VERSION}>{APP_VERSION}</span>
-            </span>
-          ) : null}
           <button className="rail-toggle" title={(railOpen ? 'Hide' : 'Show') + ' sidebar (⌘/Ctrl+B)'}
                   aria-label={railOpen ? 'Hide sidebar' : 'Show sidebar'} aria-expanded={railOpen}
                   onClick={() => setRailOpen(!railOpen)}><Ico.panel /></button>
         </div>
         {}
         <div className="rail-list">
-          {folders.map((folder,index)=><FolderRow key={folder.id} folder={folder} index={index} compact={!railOpen}
-            active={folder.id===active.id} canRemove={folders.length>1} completedByPane={completedByPane}
-            onFocus={focusFolderPane} onRemove={removeFolder}/>)}
-          <button className="ico add" title="New workspace" aria-label="New folder"
+          {folders.map((folder,index)=><FolderRow key={folder.id} folder={folder} index={index} count={folders.length} compact={!railOpen}
+            active={folder.id===active.id} activity={activityByFolder[folder.id]||0} canRemove={folders.length>1} completedByPane={completedByPane}
+            onFocus={focusFolderPane} onRemove={removeFolder} onMove={moveFolder}/>)}
+          <button className="ico add" title="New workspace" aria-label="New workspace"
                   onClick={() => go('new')}><Ico.plus /></button>
         </div>
         {}
+        {railOpen?<div className="rail-brand-meta">
+          <span className="brand-block"><span className="brand-name">ttydterm</span><span className="brand-version" aria-label={'version '+APP_VERSION}>{APP_VERSION}</span></span>
+        </div>:null}
         <div className="rail-foot">
           <button className="ico" title="Keyboard shortcuts" aria-label="Keyboard shortcuts" onClick={()=>go('shortcuts')}><Ico.keyboard /></button>
           <button className="ico rail-global" title="Global settings" aria-label="Global settings" onClick={() => go('settings')}><Ico.gear /></button>
@@ -1681,9 +1794,9 @@ function App() {
         {runtime.mode !== 'ttyd' && runtime.mode !== 'mock' ? <SetupNotice mode={runtime.mode} onRetry={()=>{setRuntime({mode:'probing'});detectRuntime().then(setRuntime)}} /> : null}
         {folders.map((f) => (
           <Surface key={f.id} folder={f} runtime={runtime} active={f.id===active.id} focusId={focusId} appResizing={appResizing}
-                   closingId={closingId} focusReq={focusReq} completedByPane={completedByPane}
+                   closingId={closingId} focusReq={focusReq} completedByPane={completedByPane} useTmux={effectiveTmux} fontSize={workspaceFontSize(f.fontSize,ui.fontSize)}
                    onFocus={onPaneFocus} onSplit={onSplit} onClose={onClose} onResize={onResize}
-                   onAddFirst={addFirstPane} onOpenSettings={openPaneSettings} onCommandComplete={onCommandComplete} />
+                   onAddFirst={addFirstPane} onOpenSettings={openPaneSettings} onOpenWorkspaceSettings={openWorkspaceSettings} onCommandComplete={onCommandComplete} onOutputActivity={onOutputActivity} />
         ))}
       </main>
 
@@ -1704,35 +1817,35 @@ function App() {
         <FirstRunDialog
           capabilities={capabilities}
           onProbe={checkCapabilities}
-          onCreate={(cwd, name, persist) => {
-            const folder: Folder = { id: uid('f-'), name, cwd, icon: 'terminal', pattern: 'dots', theme: 'paper', layout: pane('exec bash -l', persist) };
-            setConfig({ version: CONFIG_VERSION, ui: { railWidth: RAIL_DEFAULT, railOpen: true, fontSize: 13, fontWeight:'regular', notifyOnCommandFinish:false }, folders: [folder] });
+          onCreate={(cwd, name) => {
+            const folder: Folder = { id: uid('f-'), name, cwd, icon: 'terminal', pattern: 'dots', theme: 'paper', layout: pane('exec bash -l', true) };
+            setConfig({ version: CONFIG_VERSION, ui: { railWidth: RAIL_DEFAULT, railOpen: true, fontSize: 13, fontWeight:'regular', notifyOnCommandFinish:false, useTmux:true }, folders: [folder] });
             setConfigured(true);
             go('f', folder.id);
           }} />
       </ModalShell>
 
       <ModalShell open={showGlobalSettings} onClose={closeDialog}>
-        <GlobalSettings theme={active.theme} fontSize={ui.fontSize} fontWeight={ui.fontWeight}
+        <GlobalSettings fontSize={ui.fontSize} fontWeight={ui.fontWeight} useTmux={ui.useTmux} tmux={tmux}
           notifyOnCommandFinish={ui.notifyOnCommandFinish} notificationState={notificationState} onNotifications={setCommandNotifications} onClose={closeDialog}
-          onTheme={(theme) => patchFolder(active.id, (f) => ({ ...f, theme }))} onFontSize={(fontSize) => setUi({ fontSize })} onFontWeight={(fontWeight)=>setUi({fontWeight})} />
+          onTmux={setTmuxPolicy} onCheckTmux={runtime.mode==='ttyd'?checkCapabilities:undefined} onFontSize={(fontSize) => setUi({ fontSize })} onFontWeight={(fontWeight)=>setUi({fontWeight})} />
       </ModalShell>
 
-      <ModalShell open={!!routedPane} onClose={closeDialog}>
-        {routedPane ? <PaneSettings node={routedPane} folder={active} tmux={tmux} onCheckTmux={runtime.mode==='ttyd'?checkCapabilities:undefined} onChange={(patch) => onPaneChange(routedPane.id, patch)} onClose={closeDialog}/> : null}
+      <ModalShell open={!!routedPane} className="pane-settings-dialog" onClose={closeDialog}>
+        {routedPane ? <PaneSettings node={routedPane} folder={active} onChange={(patch) => onPaneChange(routedPane.id, patch)} onClose={closeDialog}/> : null}
       </ModalShell>
 
       <ModalShell open={showFolderDlg} onClose={closeDialog}>
-        <FolderDialog folder={active} canDelete={folders.length > 1} onClose={closeDialog}
+        <FolderDialog folder={active} globalFontSize={ui.fontSize} canDelete={folders.length > 1} onClose={closeDialog}
           onChange={(patch) => patchFolder(active.id, (f) => ({ ...f, ...patch }))}
           onDelete={() => removeFolder(active.id)} />
       </ModalShell>
 
       <ModalShell open={showNewDlg && !!newDraft} onClose={() => go('f', active.id)}>
         {newDraft ? (
-          <FolderDialog folder={{...newDraft,layout:null}} isNew tmux={tmux} onCheckTmux={runtime.mode==='ttyd'?checkCapabilities:undefined} onClose={() => go('f', active.id)}
-            onCreate={(next,persist) => {
-              const folder: Folder = { ...next, theme: next.theme || active.theme || 'paper', layout: pane('bash', persist) };
+          <FolderDialog folder={{...newDraft,layout:null}} isNew globalFontSize={ui.fontSize} onClose={() => go('f', active.id)}
+            onCreate={(next) => {
+              const folder: Folder = { ...next, theme: next.theme || active.theme || 'paper', layout: pane('bash', ui.useTmux) };
               setConfig((c) => ({ ...c, folders: c.folders.concat(folder) }));
               go('f', folder.id);
             }} />

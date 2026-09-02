@@ -83,5 +83,8 @@ interface Window {
   __capabilityProbeCommand?: (marker:string)=>string;
   __parseCapabilityProbeOutput?: (output:string,marker:string)=>{home:string;cwd:string;shell:string;tmux:boolean}|null;
   __pasteIntoTerminal?: (term:XtermTerminal, text:string) => void;
+  __activityLevel?: (bytes:number) => number;
+  __primarySelectionHint?: string;
+  __workspaceFontSize?: (folderFontSize:number|undefined, globalFontSize:number) => number;
   __reportCommandCompletion?: (event: { folderId:string; paneId:string; exitStatus:number; duration:number }) => void;
 }

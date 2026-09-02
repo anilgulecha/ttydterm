@@ -69,7 +69,7 @@ const readmeFeatures: DocSection = {
   blocks: [
     { kind: 'heading', text: 'Features' },
     { kind: 'list', items: [
-      [em('Workspaces:'), t(' Keep projects and terminals separate.')],
+      [em('Workspaces:'), t(' Keep projects and terminals separate, then drag their icons to set the order.')],
       [em('Split panes:'), t(' Arrange rows and columns.')],
       [em('Pane setup:'), t(' Choose each command and working directory.')],
       [em('tmux continuity:'), t(' Keep processes running through disconnects.')],
@@ -116,7 +116,7 @@ const usingIt: DocSection = {
     { kind: 'command', command: ttydLaunchCommand() },
     { kind: 'para', spans: [t('Open '), link(TTYD_URL), t('. The browser asks for the username and password before it opens the terminal.')] },
     { kind: 'heading', text: 'Keep a process alive with tmux' },
-    { kind: 'para', spans: [t('Turn on '), em('Run in tmux'), t(' in a pane. ttydterm starts the command in a tmux session. When the browser or ttyd disconnects, the process keeps running. The pane reconnects to the same session later.')] },
+    { kind: 'para', spans: [t('Turn on '), em('Use tmux when available'), t(' in global settings. ttydterm starts every command in a tmux session. When the browser or ttyd disconnects, the process keeps running. The pane reconnects to the same session later.')] },
     { kind: 'para', spans: [t('ttydterm checks for tmux in the PATH used by ttyd’s login shell. If it is installed but not found, run '), em('command -v tmux'), t(' in a pane and update that shell’s login PATH.')] },
     { kind: 'para', spans: [t('The process lasts while the tmux server and session run. A host reboot or a stopped tmux session ends it.')] },
   ],
@@ -128,7 +128,7 @@ const themes: DocSection = {
     { kind: 'lead', spans: [em('Each workspace keeps its own theme.')] },
     { kind: 'para', spans: [t('Choose a theme below. The app repaints this workspace at once. Other workspaces keep their current themes.')] },
     { kind: 'themes' },
-    { kind: 'para', spans: [t('Open another page and return here to check the saved choice. A real ttyd session puts this control in each workspace settings dialog and in global settings at '), code('Ctrl/⌘ + ,'), t('.')] },
+    { kind: 'para', spans: [t('Open another page and return here to check the saved choice. A real ttyd session puts this control in each workspace settings dialog. Open global settings with '), code('Ctrl/⌘ + ,'), t(' for app-wide font, tmux, and notification choices.')] },
     { kind: 'para', spans: [t('Every built-in theme passes the text and focus contrast checks in the test suite.')] },
     { kind: 'para', spans: [t('This demo keeps changes in memory. It does not replace a saved terminal workspace.')] },
   ],

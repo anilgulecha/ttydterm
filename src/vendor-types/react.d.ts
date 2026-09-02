@@ -58,6 +58,9 @@ declare namespace React {
     pointerId: number;
     pointerType: string;
   }
+  interface DragEvent<T = Element> extends MouseEvent<T> {
+    dataTransfer: DataTransfer;
+  }
   interface KeyboardEvent<T = Element> extends SyntheticEvent<T> {
     key: string;
     altKey: boolean;
@@ -83,6 +86,13 @@ declare namespace React {
     onClick?: EventHandler<MouseEvent<T>> | undefined;
     onDoubleClick?: EventHandler<MouseEvent<T>> | undefined;
     onContextMenu?: EventHandler<MouseEvent<T>> | undefined;
+    onMouseDownCapture?: EventHandler<MouseEvent<T>> | undefined;
+    onAuxClickCapture?: EventHandler<MouseEvent<T>> | undefined;
+    onDragStart?: EventHandler<DragEvent<T>> | undefined;
+    onDragEnd?: EventHandler<DragEvent<T>> | undefined;
+    onDragOver?: EventHandler<DragEvent<T>> | undefined;
+    onDragLeave?: EventHandler<DragEvent<T>> | undefined;
+    onDrop?: EventHandler<DragEvent<T>> | undefined;
     onPointerDown?: EventHandler<PointerEvent<T>> | undefined;
     onPointerDownCapture?: EventHandler<PointerEvent<T>> | undefined;
     onPointerMove?: EventHandler<PointerEvent<T>> | undefined;

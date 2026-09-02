@@ -61,6 +61,8 @@ export interface Folder {
   icon: string | null;
   pattern: PatternName;
   layout: LayoutNode | null;
+  /* Optional per-workspace terminal font size; absent means the global size. */
+  fontSize?: number;
   /* Documentation configs use this page id. Restored user configs drop it. */
   doc?: string;
 }
@@ -73,6 +75,8 @@ export interface UiState {
   fontSize: number;
   fontWeight: FontWeight;
   notifyOnCommandFinish: boolean;
+  /* Global tmux policy. Panes follow it; they do not choose individually. */
+  useTmux: boolean;
 }
 
 export interface Config {

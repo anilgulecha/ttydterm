@@ -187,3 +187,29 @@ These rules apply to terminal workspaces and other single-file browser tools.
 57. Dynamic favicons should be low-frequency, privacy-safe supplements to visible
     state. Render them from trusted theme tokens, use a static offline fallback,
     avoid names and commands, and never rely on color alone for attention.
+
+58. Aggregate high-rate terminal output outside React state, publish only coarse
+    visual levels at a fixed cadence, and keep transient activity out of saved
+    configuration and accessible names.
+
+59. Terminal mouse protocols can consume browser buttons before native actions run.
+    Intercept only the conflicting button in capture phase, preserve the browser
+    default, and explain when a platform selection mechanism is unavailable.
+
+60. A setting labelled global needs one source of truth and one effective runtime
+    value. If changing it restarts processes, state that in the control and test
+    every mounted process rather than only the active one.
+
+61. Pointer reordering needs an equivalent keyboard path. Keep stable item identity,
+    persist the array order, and verify that moving an item does not activate it or
+    remount its long-lived content.
+
+62. A capability retry is diagnostic, not a policy change. Preserve the last known
+    effective mode while probing so a retry cannot tear down running connections.
+
+63. Treat restored identifiers as object-map input as well as React keys. Reject
+    duplicates and inherited property names, or store keyed state in prototype-free
+    maps.
+
+64. Clamp context menus from their measured box after layout. Fixed height guesses
+    fail when actions change, and initial focus must skip disabled menu items.

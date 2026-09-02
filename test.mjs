@@ -106,10 +106,10 @@ ok('social previews use the published product screenshot', await page.evaluate((
     content('meta[name="twitter:image"]')==='https://www.gulecha.org/ttydterm/docs/ttydterm.png';
 }));
 ok('hash route settled on a folder', /#\/f\//.test(page.url()), page.url());
-ok('release 1.4 is a compact superscript beside the wordmark and exposed on the shell', await page.evaluate(() =>
-  document.querySelector('.brand-version')?.textContent === '1.4' &&
-  document.querySelector('.brand-version')?.getAttribute('aria-label') === 'version 1.4' &&
-  document.querySelector('.shell')?.getAttribute('data-version') === '1.4'));
+ok('release 1.5 is a compact superscript beside the wordmark and exposed on the shell', await page.evaluate(() =>
+  document.querySelector('.brand-version')?.textContent === '1.5' &&
+  document.querySelector('.brand-version')?.getAttribute('aria-label') === 'version 1.5' &&
+  document.querySelector('.shell')?.getAttribute('data-version') === '1.5'));
 const faviconBoot=await page.evaluate(()=>{
   const links=[...document.querySelectorAll('link[rel~="icon"]')],link=links[0],href=link?.getAttribute('href')||'';
   return {count:links.length,state:link?.dataset.state,href,svg:href.startsWith('data:image/svg+xml,')?decodeURIComponent(href.slice(href.indexOf(',')+1)):''};
@@ -156,23 +156,20 @@ const stray = await page.evaluate(() => {
 console.log('\ndesign law');
 ok('only text outside terminals is the brand + folder names', stray.length === 0, stray.join(' | '));
 
-const brand = await page.locator('.rail-head .brand-name').textContent().catch(() => null);
-ok('the rail is headed by the product name', brand === 'ttydterm', String(brand));
-ok('the brand sits above the workspace list', await page.evaluate(() => {
-  const b = document.querySelector('.brand-name');
-  const l = document.querySelector('.rail-list');
-  return !!b && !!l && b.getBoundingClientRect().bottom <= l.getBoundingClientRect().top + 1;
-}));
-ok('the collapse control sits to the right of the brand on the same centre line', await page.evaluate(() => {
-  const b = document.querySelector('.brand-name');
-  const t = document.querySelector('.rail-head .rail-toggle');
-  if(!b||!t)return false;const br=b.getBoundingClientRect(),tr=t.getBoundingClientRect();
-  return t.getBoundingClientRect().left >= br.right - 1 && Math.abs((br.top+br.height/2)-(tr.top+tr.height/2))<=1;
+const brand = await page.locator('.rail-brand-meta .brand-name').textContent().catch(() => null);
+ok('the rail carries the product name above its utility footer', brand === 'ttydterm' && await page.evaluate(()=>{
+  const brand=document.querySelector('.rail-brand-meta'),foot=document.querySelector('.rail-foot'),list=document.querySelector('.rail-list');
+  return !!brand&&!!foot&&!!list&&brand.getBoundingClientRect().top>=list.getBoundingClientRect().top&&brand.getBoundingClientRect().bottom<=foot.getBoundingClientRect().top+1;
+}), String(brand));
+ok('the collapse control shares the workspace icon column', await page.evaluate(() => {
+  const badge=document.querySelector('.folder-badge'),toggle=document.querySelector('.rail-toggle');
+  if(!badge||!toggle)return false;const b=badge.getBoundingClientRect(),t=toggle.getBoundingClientRect();
+  return Math.abs((b.left+b.width/2)-(t.left+t.width/2))<=1;
 }));
 ok('the release uses a light superscript pill immediately after ttydterm',await page.evaluate(()=>{
   const name=document.querySelector('.brand-name'),badge=document.querySelector('.brand-version');if(!badge||!name)return false;
   const b=badge.getBoundingClientRect(),n=name.getBoundingClientRect(),style=getComputedStyle(badge);
-  return badge.textContent==='1.4'&&b.left>=n.right&&b.top<n.top+n.height/2&&b.height<n.height&&parseFloat(style.borderRadius)>=6&&style.boxShadow!=='none';
+  return badge.textContent==='1.5'&&b.left>=n.right&&b.top<n.top+n.height/2&&b.height<n.height&&parseFloat(style.borderRadius)>=6&&style.boxShadow!=='none';
 }));
 ok('workspace icons have no decorative line markers',await page.evaluate(()=>
   [...document.querySelectorAll('.folder-badge')].every((badge)=>getComputedStyle(badge,'::after').content==='none')));
@@ -257,6 +254,12 @@ ok('terminal paste restores xterm focus after inserting clipboard text',await pa
   const calls=[];window.__pasteIntoTerminal({paste:(text)=>calls.push('paste:'+text),focus:()=>calls.push('focus')},'hello');
   window.__pasteIntoTerminal({paste:(text)=>calls.push('empty:'+text),focus:()=>calls.push('empty-focus')},'');
   return calls.join('|')==='paste:hello|focus|empty-focus';
+}));
+ok('workspace activity buckets are capped and log-scaled',await page.evaluate(()=>{
+  const level=window.__activityLevel;return level(0)===0&&level(23)===0&&level(24)===1&&level(256)>=1&&level(4096)===3&&level(1e9)===3;
+}));
+ok('workspace font size resolves override before global and rejects unsupported values',await page.evaluate(()=>{
+  const size=window.__workspaceFontSize;return size(undefined,13)===13&&size(16,13)===16&&size(15,13)===13;
 }));
 const links = await page.locator('.surface:not([hidden]) a.term-link').count();
 ok('terminal URLs render as clickable links', links >= 2, String(links));
@@ -502,6 +505,12 @@ ok('pane menu is fully opaque over the terminal',
   popBleed.op === '1' && /^rgb\(/.test(popBleed.bg), JSON.stringify(popBleed));
 ok('right-click menu icons use the larger 17px presentation',await page.evaluate(()=>
   [...document.querySelectorAll('.panepop .pico svg')].every((icon)=>icon.getBoundingClientRect().width===17&&icon.getBoundingClientRect().height===17)));
+ok('pane actions and split axes render as three coherent groups',await page.evaluate(()=>{
+  const actions=[...document.querySelectorAll('.panepop .pane-menu-actions button')],columns=[...document.querySelectorAll('.panepop .pane-menu-splits:nth-of-type(2) button')],rows=[...document.querySelectorAll('.panepop .pane-menu-splits:nth-of-type(3) button')];
+  const oneRow=(items)=>items.length>0&&new Set(items.map((item)=>Math.round(item.getBoundingClientRect().top))).size===1;
+  return actions.length===4&&columns.length===3&&rows.length===3&&oneRow(actions)&&oneRow(columns)&&oneRow(rows)&&
+    actions[0].getBoundingClientRect().top<columns[0].getBoundingClientRect().top&&columns[0].getBoundingClientRect().top<rows[0].getBoundingClientRect().top;
+}));
 
 await page.keyboard.press('Escape');
 const paneBoxForMenu = await firstPane.boundingBox();
@@ -759,6 +768,12 @@ const badges = await page.$$eval('.rail.collapsed .folder-badge', (n) =>
   n.map((e) => (e.querySelector('svg') ? 'icon:' + e.querySelector('svg').dataset.icon : 'text:' + e.textContent.trim())));
 ok('each collapsed workspace shows an icon or its initials',
   badges.length === 3 && badges.every((b) => /^icon:\w+$/.test(b) || /^text:.{1,2}$/.test(b)), badges.join(', '));
+const collapsedActive=await page.locator('.folder.active .folder-main').getAttribute('aria-label');
+await page.locator('.rail.collapsed .folder').nth(1).click({button:'right',position:{x:26,y:18}});
+await page.waitForSelector('.rail.collapsed .folder-menu');
+ok('right-click menu remains available for collapsed workspace icons without switching',
+  (await page.locator('.rail.collapsed .folder-menu').count())===1&&await page.locator('.folder.active .folder-main').getAttribute('aria-label')===collapsedActive);
+await page.keyboard.press('Escape');
 await page.screenshot({ path: `${SHOTS}/10-collapsed-rail.png` });
 await page.locator('.rail-toggle[aria-label="Show sidebar"]').click();
 await page.waitForTimeout(360);
@@ -792,11 +807,11 @@ await page.locator('.rail-global[aria-label="Global settings"]').click();
 await page.waitForSelector('dialog[open] .global-settings');
 ok('global settings use their own hash route and the same dialog presentation as folder settings',
   /#\/settings$/.test(page.url()) && (await page.locator('dialog[open] .dlg.global-settings').count()) === 1);
-ok('global settings contain theme, font, and command-notification controls',
-  (await page.locator('dialog[open] .global-settings .theme-opt').count()) === 9 &&
+ok('global settings contain only global font, tmux, and notification controls',
+  (await page.locator('dialog[open] .global-settings .theme-opt').count()) === 0 &&
   (await page.locator('dialog[open] .global-settings .font-groups button').count()) === 6 &&
   (await page.locator('dialog[open] .global-settings .weight-groups button').count()) === 3 &&
-  (await page.locator('dialog[open] .global-settings input[type=checkbox]').count()) === 1);
+  (await page.locator('dialog[open] .global-settings input[type=checkbox]').count()) === 2);
 await page.screenshot({ path: `${SHOTS}/18-global-settings.png` });
 const fsBefore = await page.locator(LIVE_TERM).first().evaluate(e=>getComputedStyle(e).fontSize);
 await page.locator('dialog[open] .global-settings .font-groups button', {hasText:'16'}).click();
@@ -808,7 +823,15 @@ await page.locator('dialog[open] .global-settings .weight-groups button',{hasTex
 const fwAfter=await page.locator(LIVE_TERM).first().evaluate(e=>getComputedStyle(e).fontWeight);
 ok('font-weight buttons apply immediately',fwBefore!==fwAfter&&fwAfter==='600',`${fwBefore} -> ${fwAfter}`);
 await page.locator('dialog[open] .global-settings .weight-groups button',{hasText:'Regular'}).click();
-const notifyToggle=page.locator('dialog[open] .global-settings input[type=checkbox]');
+const notifyToggle=page.getByRole('checkbox',{name:'Notify when commands finish'});
+const tmuxToggle=page.getByRole('checkbox',{name:'Use tmux when available'});
+await tmuxToggle.uncheck();
+ok('global tmux policy rewrites every pane consistently',await page.evaluate(()=>{
+  const config=JSON.parse(localStorage.getItem('ttyd-workspace-v2')),values=[];
+  const walk=(node)=>node.type==='pane'?values.push(node.persist):node.children.forEach(walk);config.folders.forEach((folder)=>walk(folder.layout));
+  return config.ui.useTmux===false&&values.every((value)=>value===false);
+}));
+await tmuxToggle.check();
 await notifyToggle.click();
 ok('enabling command notifications requests permission from the user gesture and then persists',await page.evaluate(()=>
   window.__notificationPermissionRequests===1 && JSON.parse(localStorage.getItem('ttyd-workspace-v2')).ui.notifyOnCommandFinish===true));
@@ -897,6 +920,26 @@ await page.screenshot({ path: `${SHOTS}/18-folder-row-hover.png` });
 const folderMenuSel = '.folder.active .folder-act[aria-label^="Workspace menu"]';
 ok('every workspace row carries one triple-dot menu',
   (await page.locator('.folder .folder-act[aria-label^="Workspace menu"]').count()) === 3);
+await page.locator('.folder').first().click({button:'right',position:{x:32,y:18}});
+await page.waitForSelector('.folder:first-child .folder-menu');
+ok('the first workspace context menu focuses its first enabled item',await page.evaluate(()=>
+  document.activeElement?.matches('.folder:first-child .folder-menu button:not(:disabled)')&&document.activeElement?.textContent?.includes('Move down')));
+await page.keyboard.press('Escape');
+ok('Escape closes the first workspace menu and restores row focus',await page.evaluate(()=>
+  !document.querySelector('.folder:first-child .folder-menu')&&document.activeElement?.matches('.folder:first-child .folder-main')));
+await page.locator('.folder').last().evaluate((row)=>row.dispatchEvent(new MouseEvent('contextmenu',{clientX:innerWidth-2,clientY:innerHeight-2,bubbles:true})));
+await page.waitForSelector('.folder:last-of-type .folder-menu');
+ok('workspace context menus clamp their measured height inside the viewport',await page.evaluate(()=>{
+  const box=document.querySelector('.folder:last-of-type .folder-menu')?.getBoundingClientRect();return !!box&&box.right<=innerWidth-5&&box.bottom<=innerHeight-5;
+}));
+await page.keyboard.press('Escape');
+const activeBeforeContext=await page.locator('.folder.active .folder-name').textContent();
+await page.locator('.folder').nth(1).click({button:'right',position:{x:32,y:18}});
+await page.waitForSelector('.folder:nth-of-type(2) .folder-menu');
+ok('right-clicking a workspace opens its menu without activating it',
+  (await page.locator('.folder:nth-of-type(2) .folder-menu').count())===1&&await page.locator('.folder.active .folder-name').textContent()===activeBeforeContext);
+await page.keyboard.press('Escape');
+ok('Escape from a row context menu restores focus to the workspace button',await page.evaluate(()=>document.activeElement?.classList.contains('folder-main')));
 await page.locator(folderMenuSel).focus();
 await page.keyboard.press('Enter');
 ok('workspace menu opens from its keyboard trigger',
@@ -911,8 +954,8 @@ ok('an unrelated app update does not remount rows or close an open workspace men
 const rowOpen = await boxOf(page, '.folder.active .folder-name');
 ok('opening the overlaid workspace menu does not resize the workspace name', sameBox(rowRest, rowOpen),
   JSON.stringify(rowRest) + ' -> ' + JSON.stringify(rowOpen));
-ok('workspace menu offers settings and close',
-  (await page.locator('.folder.active .folder-menu [role="menuitem"]').count()) === 2);
+ok('workspace menu offers ordering, settings and close',
+  (await page.locator('.folder.active .folder-menu [role="menuitem"]').count()) === 4);
 await page.locator('.folder.active .folder-menu [role="menuitem"]', {hasText:'Settings'}).click();
 await page.waitForSelector('dialog[open]');
 ok('folder dialog is route-driven', /\/settings$/.test(page.url()), page.url());
@@ -937,6 +980,12 @@ ok('folder pattern applies immediately to terminals',
 await page.screenshot({ path: `${SHOTS}/19-folder-pattern-live.png` });
 await page.fill('dialog[open] input[type=text]:not(.mono)', 'kalviumjr');
 await page.waitForTimeout(120);
+const workspaceFontBefore=await page.locator(LIVE_TERM).first().evaluate((element)=>getComputedStyle(element).fontSize);
+await page.locator('dialog[open] .workspace-fonts button',{hasText:'16'}).click();
+await page.waitForTimeout(80);
+const workspaceFontAfter=await page.locator(LIVE_TERM).first().evaluate((element)=>getComputedStyle(element).fontSize);
+ok('workspace font override wins over the global size',workspaceFontBefore!==workspaceFontAfter&&workspaceFontAfter==='16px',`${workspaceFontBefore} -> ${workspaceFontAfter}`);
+await page.locator('dialog[open] .workspace-fonts button',{hasText:'Global'}).click();
 await page.locator('dialog[open] .btn.primary').click();
 await page.waitForTimeout(150);
 
@@ -944,8 +993,8 @@ console.log('\npane settings dialog');
 const pane2 = page.locator('.surface:not([hidden]) .pane').nth(1);
 await page.mouse.move(0, 0);
 await page.waitForTimeout(200);
-const psInkBefore = await inkOf(page, FIRSTLINE);
-const psScrollBefore = await page.evaluate(() =>
+let psInkBefore = await inkOf(page, FIRSTLINE);
+let psScrollBefore = await page.evaluate(() =>
   Math.round(document.querySelector('.surface:not([hidden]) .viewport').scrollLeft));
 
 await pane2.hover();
@@ -954,7 +1003,17 @@ await page.evaluate(() => {
     .querySelector('.pico[aria-label="Pane menu"]').click();
 });
 await page.waitForSelector('.panepop');
-await page.evaluate(() => document.querySelector('.panepop .pico[aria-label="Pane settings"]').click());
+ok('pane menu provides a direct workspace appearance route',await page.evaluate(()=>{
+  document.querySelector('.panepop [aria-label="Workspace appearance"]')?.click();return location.hash.endsWith('/settings');
+}));
+await page.waitForSelector('dialog[open] .workspace-fonts');
+await page.locator('dialog[open] .btn.primary').click();
+await page.waitForTimeout(100);
+await pane2.hover();
+await page.evaluate(()=>document.querySelectorAll('.surface:not([hidden]) .pane')[1].querySelector('.pico[aria-label="Pane menu"]').click());
+psInkBefore=await inkOf(page,FIRSTLINE);
+psScrollBefore=await page.evaluate(()=>Math.round(document.querySelector('.surface:not([hidden]) .viewport').scrollLeft));
+await page.evaluate(()=>document.querySelector('.panepop [aria-label="Pane settings"]')?.click());
 await page.waitForSelector('.panesettings');
 await page.locator('.panesettings').evaluate((el) =>
   Promise.all(el.getAnimations({ subtree: true }).map((a) => a.finished.catch(() => {}))));
@@ -978,32 +1037,17 @@ const psControls = await page.evaluate(() => ({
   themes: document.querySelectorAll('.panesettings .themes .theme-opt').length,
   selects: document.querySelectorAll('.panesettings select').length,
 }));
-ok('pane settings hold exactly command + tmux',
-  psControls.text === 1 && psControls.check === 1 && psControls.themes === 0 && psControls.selects === 0,
+ok('pane settings hold only the pane command',
+  psControls.text === 1 && psControls.check === 0 && psControls.themes === 0 && psControls.selects === 0,
   JSON.stringify(psControls));
 ok('pane settings offer no Save or Cancel', await page.evaluate(() =>
   !/(Save|Cancel)/.test(document.querySelector('.panesettings').textContent)));
 
-const tmuxRow = await page.evaluate(() => {
-  const box = document.querySelector('.panesettings input[type=checkbox]');
-  const lab = box.closest('label');
-  const cs = getComputedStyle(lab);
-  const txt = [...lab.childNodes].find((n) => n.textContent.trim() && n !== box);
-  const r = box.getBoundingClientRect();
-  const t = txt ? (txt.nodeType === 1 ? txt.getBoundingClientRect() : null) : null;
-  return {
-    display: cs.display,
-    transform: cs.textTransform,
-    gap: t ? +(t.left - r.right).toFixed(1) : null,
-    sameLine: t ? Math.abs((t.top + t.height / 2) - (r.top + r.height / 2)) < 6 : null,
-    boxW: +r.width.toFixed(0),
-  };
-});
-ok('the tmux control is a checkbox row, not a caption',
-  tmuxRow.display === 'flex' && tmuxRow.transform === 'none', JSON.stringify(tmuxRow));
-ok('its label clears the box and shares its line',
-  tmuxRow.gap >= 4 && tmuxRow.sameLine === true, JSON.stringify(tmuxRow));
-ok('the checkbox is not collapsed', tmuxRow.boxW >= 12, tmuxRow.boxW + 'px');
+ok('pane settings form fills its dialog with no empty right strip',await page.evaluate(()=>{
+  const dialog=document.querySelector('dialog.pane-settings-dialog'),form=document.querySelector('.panesettings');
+  if(!dialog||!form)return false;const d=dialog.getBoundingClientRect(),f=form.getBoundingClientRect();
+  return Math.abs(d.width-f.width)<=1&&Math.abs(d.left-f.left)<=1;
+}));
 
 const psInkAfter = await inkOf(page, FIRSTLINE);
 const psScrollAfter = await page.evaluate(() =>
@@ -1042,19 +1086,6 @@ await page.waitForFunction(()=>[...document.querySelectorAll('.surface:not([hidd
 const hasHtop=await page.locator(LIVE_TERM,{hasText:'htop'}).count();
 ok('Enter commits the command once and restarts the pane',hasHtop>0,String(hasHtop));
 
-const persistBefore = await page.evaluate(() => document.querySelector('.panesettings input[type=checkbox]').checked);
-await page.locator('.panesettings input[type=checkbox]').click();
-await page.waitForTimeout(200);
-const persistStored = await page.evaluate(() => {
-  const c = JSON.parse(localStorage.getItem('ttyd-workspace-v2'));
-  const flat = [];
-  const walk = (n) => { if (!n) return; n.type === 'pane' ? flat.push(n) : n.children.forEach(walk); };
-  c.folders.forEach((f) => walk(f.layout));
-  return flat.find((p) => p.command === 'htop')?.persist;
-});
-ok('the tmux checkbox autosaves into the config', persistStored === !persistBefore,
-  `${persistBefore} -> ${persistStored}`);
-
 await page.screenshot({ path: `${SHOTS}/20-pane-settings.png` });
 await page.locator('.panesettings .btn.primary').click();
 await page.waitForTimeout(200);
@@ -1071,7 +1102,19 @@ ok('Escape discards an uncommitted command draft',await page.evaluate((paneId)=>
   return panes.find((pane)=>pane.id===paneId)?.command==='htop';
 },committedPaneId));
 
-console.log('\nworkspace icon');
+console.log('\nworkspace icon + ordering');
+const orderBefore=await page.$$eval('.folder-name',(items)=>items.map((item)=>item.textContent));
+await page.locator('.folder-badge').first().dragTo(page.locator('.folder-badge').nth(2));
+await page.waitForTimeout(120);
+const orderAfter=await page.$$eval('.folder-name',(items)=>items.map((item)=>item.textContent));
+ok('dragging a workspace icon reorders and persists workspaces',orderAfter.join('|')===orderBefore.slice(1).concat(orderBefore[0]).join('|')&&await page.evaluate((order)=>
+  JSON.parse(localStorage.getItem('ttyd-workspace-v2')).folders.map((folder)=>folder.name).join('|')===order.join('|'),orderAfter));
+await page.locator('.folder').nth(2).click({button:'right'});
+await page.getByRole('menuitem',{name:'Move up'}).click();
+await page.locator('.folder').nth(1).click({button:'right'});
+await page.getByRole('menuitem',{name:'Move up'}).click();
+ok('workspace menu offers a keyboard-operable reorder path',
+  (await page.$$eval('.folder-name',(items)=>items.map((item)=>item.textContent))).join('|')===orderBefore.join('|'));
 await page.locator('.folder.active').hover();
 await page.locator('.folder.active .folder-act[aria-label^="Workspace menu"]').click();
 await page.locator('.folder.active .folder-menu [role="menuitem"]', {hasText:'Settings'}).click();
@@ -1129,13 +1172,12 @@ ok('closing backup returns to the same folder',
   (await page.locator('.folder.active .folder-name').textContent()) === beforeDialogs);
 
 const folderCountBefore = await page.locator('.folder').count();
-await page.locator('.ico[aria-label="New folder"]').click();
+await page.locator('.ico[aria-label="New workspace"]').click();
 await page.waitForSelector('dialog[open]');
-ok('new-folder route is not stomped', /#\/new/.test(page.url()), page.url());
+ok('new-workspace route is not stomped', /#\/new/.test(page.url()), page.url());
 const duringNew = await page.locator('.folder.active .folder-name').textContent();
 ok('active folder survives behind #/new', duringNew === beforeDialogs, `${beforeDialogs} -> ${duringNew}`);
-const newFolderTmux=page.locator('dialog[open] input[type=checkbox]');
-ok('new workspaces default to detected tmux but allow opt-out',await newFolderTmux.isChecked()&&await newFolderTmux.isEnabled());
+ok('new workspaces inherit global tmux without a pane-level choice',(await page.locator('dialog[open] input[type=checkbox]').count())===0);
 await page.locator('dialog[open] .btn', { hasText: 'Cancel' }).click();
 await page.waitForTimeout(180);
 ok('new-folder dialog closes on cancel', (await page.locator('dialog[open]').count()) === 0);
@@ -1143,22 +1185,21 @@ ok('cancel created no folder', (await page.locator('.folder').count()) === folde
 ok('cancel kept the active folder',
   (await page.locator('.folder.active .folder-name').textContent()) === beforeDialogs);
 
-await page.locator('.ico[aria-label="New folder"]').click();
+await page.locator('.ico[aria-label="New workspace"]').click();
 await page.waitForSelector('dialog[open]');
-await page.locator('dialog[open] input[type=checkbox]').uncheck();
-await page.locator('dialog[open] input[type=text]').nth(1).fill('tmux-opt-out');
+await page.locator('dialog[open] input[type=text]').nth(1).fill('global-tmux-workspace');
 await page.locator('dialog[open] .btn.primary', {hasText:'Create'}).click();
 await page.waitForTimeout(180);
-ok('a new workspace respects the tmux opt-out',await page.evaluate(()=>{
+ok('a new workspace follows the global tmux policy',await page.evaluate(()=>{
   const config=JSON.parse(localStorage.getItem('ttyd-workspace-v2')),folder=config.folders.at(-1);
-  return folder.name==='tmux-opt-out'&&folder.layout.type==='pane'&&folder.layout.persist===false;
+  return folder.name==='global-tmux-workspace'&&folder.layout.type==='pane'&&folder.layout.persist===config.ui.useTmux;
 }));
 await page.locator('.folder.active').hover();
 await page.locator('.folder.active .folder-act').click();
 await page.locator('.folder.active .folder-menu [role=menuitem]',{hasText:'Settings'}).click();
-await page.locator('dialog[open] .btn',{hasText:'Delete folder'}).click();
+await page.locator('dialog[open] .btn',{hasText:'Delete workspace'}).click();
 await page.waitForTimeout(180);
-ok('the opt-out test workspace can be removed cleanly',(await page.locator('.folder').count())===folderCountBefore);
+ok('the test workspace can be removed cleanly',(await page.locator('.folder').count())===folderCountBefore);
 
 await page.locator('.folder').first().click();
 await page.waitForTimeout(180);
@@ -1381,13 +1422,17 @@ ok('static documentation has no console/page errors', demoErrors.length === 0, d
 ok('demo mode keeps the offline programmatic favicon active',await demo.evaluate(()=>{
   const link=document.querySelector('link[data-ttydterm-favicon]');return link?.getAttribute('href')?.startsWith('data:image/svg+xml,')&&link.dataset.state==='normal';
 }));
-await demo.locator('.ico[aria-label="New folder"]').click();
+await demo.locator('.ico[aria-label="New workspace"]').click();
 await demo.waitForSelector('dialog[open]');
-ok('static mode resolves tmux as unavailable instead of checking forever',await demo.evaluate(()=>{
-  const input=document.querySelector('dialog[open] input[type=checkbox]'),dialog=document.querySelector('dialog[open]');
-  return !!input&&input.disabled&&!input.checked&&dialog?.textContent?.includes('tmux is not in the PATH')&&!dialog.textContent.includes('Checking for tmux');
-}));
+ok('static new-workspace flow has no pane-level tmux choice',(await demo.locator('dialog[open] input[type=checkbox]').count())===0);
 await demo.locator('dialog[open] .btn',{hasText:'Cancel'}).click();
+await demo.locator('.rail-global[aria-label="Global settings"]').click();
+await demo.waitForSelector('.global-settings');
+ok('static mode resolves the global tmux capability instead of checking forever',await demo.evaluate(()=>{
+  const dialog=document.querySelector('.global-settings');
+  return dialog?.textContent?.includes('tmux is unavailable')&&!dialog.textContent.includes('Checking for tmux');
+}));
+await demo.locator('.global-settings .btn.primary').click();
 
 const docNames = await demo.$$eval('.folder-name', (nodes) => nodes.map((node) => node.textContent));
 ok('documentation has four focused pages in reading order',
@@ -1575,9 +1620,22 @@ ok('static hosting migrates rather than replacing a saved real-workspace configu
   await saved.locator('.folder-name').textContent() === 'saved-real' &&
   await saved.evaluate(() => {
     const config=JSON.parse(localStorage.getItem('ttyd-workspace-v2'));
-    return config.version===7 && config.ui.notifyOnCommandFinish===false && config.folders[0].id==='saved-real';
+    return config.version===8 && config.ui.notifyOnCommandFinish===false && config.ui.useTmux===true && config.folders[0].id==='saved-real';
   }));
 await savedContext.close();
+const duplicateContext=await browser.newContext();
+await duplicateContext.addInitScript(()=>localStorage.setItem('ttyd-workspace-v2',JSON.stringify({version:8,ui:{railWidth:176,railOpen:true,fontSize:13,fontWeight:'regular',notifyOnCommandFinish:false,useTmux:false},folders:[
+  {id:'duplicate',name:'one',cwd:'~',theme:'paper',icon:null,pattern:'plain',layout:{type:'pane',id:'pane',command:'bash',persist:false}},
+  {id:'duplicate',name:'two',cwd:'~',theme:'paper',icon:null,pattern:'plain',layout:{type:'pane',id:'pane',command:'bash',persist:false}},
+  {id:'__proto__',name:'three',cwd:'~',theme:'paper',icon:null,pattern:'plain',layout:{type:'pane',id:'toString',command:'bash',persist:false}},
+]})));
+const duplicatePage=await duplicateContext.newPage();
+await duplicatePage.goto(BASE,{waitUntil:'networkidle'});
+ok('untrusted restore regenerates duplicate and object-prototype ids',await duplicatePage.evaluate(()=>{
+  const config=JSON.parse(localStorage.getItem('ttyd-workspace-v2')),folderIds=config.folders.map((folder)=>folder.id),paneIds=config.folders.map((folder)=>folder.layout.id),safe=(id)=>!Object.prototype.hasOwnProperty.call(Object.prototype,id);
+  return new Set(folderIds).size===3&&new Set(paneIds).size===3&&folderIds.every(safe)&&paneIds.every(safe)&&document.querySelectorAll('.folder').length===3;
+}));
+await duplicateContext.close();
 await demoContext.close();
 
 const fileContext=await browser.newContext();
@@ -1650,15 +1708,46 @@ await transitionPage.locator('.panepop [aria-label="Paste"]').click();
 await transitionPage.waitForFunction(()=>document.activeElement?.classList.contains('xterm-helper-textarea'));
 ok('right-click paste returns actual DOM focus to xterm input',await transitionPage.evaluate(()=>
   document.activeElement?.classList.contains('xterm-helper-textarea')));
-await transitionPane.click({button:'right',position:{x:80,y:80}});
-await transitionPage.locator('.panepop [aria-label="Pane settings"]').click();
-await transitionPage.waitForFunction(()=>document.querySelector('.panesettings')?.textContent?.includes('Could not check for tmux'));
+await transitionPage.evaluate(()=>location.hash='#/settings');
+await transitionPage.waitForFunction(()=>document.querySelector('.global-settings')?.textContent?.includes('Could not check for tmux'));
 ok('a probe failure is explained and retryable instead of being reported as tmux absent',await transitionPage.evaluate(()=>{
-  const dialog=document.querySelector('.panesettings'),retry=dialog?.querySelector('.hint-action'),box=retry?.getBoundingClientRect();
+  const dialog=document.querySelector('.global-settings'),retry=dialog?.querySelector('.hint-action'),box=retry?.getBoundingClientRect();
   return dialog?.textContent?.includes('Could not check for tmux')&&!dialog.textContent.includes('not in the PATH')&&
     !!retry&&box.height>=24&&box.width>=24;
 }));
 await transitionContext.close();
+
+const retryContext=await browser.newContext();
+await retryContext.addInitScript((config)=>{
+  localStorage.setItem('ttyd-workspace-v2',JSON.stringify(config));window.__retrySockets=[];window.__holdCapabilityProbe=false;
+  const frame=(command,text)=>{const data=new TextEncoder().encode(text),out=new Uint8Array(data.length+1);out[0]=command.charCodeAt(0);out.set(data,1);return out.buffer};
+  class FakeWebSocket{
+    constructor(){this.readyState=0;this.sent=[];this.closed=false;window.__retrySockets.push(this);queueMicrotask(()=>{this.readyState=1;this.onopen?.({})})}
+    send(value){
+      const text=new TextDecoder().decode(value);this.sent.push(text);
+      if(text.startsWith('{'))queueMicrotask(()=>this.onmessage?.({data:frame('0','shell ready\r\n')}));
+      const marker=text.match(/__TTYDTERM_PROBE_[a-z0-9]+__/i)?.[0];
+      if(marker&&!window.__holdCapabilityProbe)queueMicrotask(()=>this.onmessage?.({data:frame('0','\0'+marker+'\0/home/test\0/work\0/bin/bash\0'+'0\0'+marker+'\0')}));
+      if(text.includes('retry-pane'))window.__retryTerminalSocket=this;
+    }
+    close(){this.closed=true;this.readyState=3}
+  }
+  Object.defineProperty(window,'WebSocket',{value:FakeWebSocket,configurable:true});
+},{version:8,ui:{railWidth:176,railOpen:true,fontSize:13,fontWeight:'regular',notifyOnCommandFinish:false,useTmux:true},folders:[
+  {id:'retry-workspace',name:'retry',cwd:'~',theme:'paper',icon:null,pattern:'plain',layout:{type:'pane',id:'retry-pane',command:'bash',persist:true}},
+]});
+const retryPage=await retryContext.newPage();
+await retryPage.route('**/token',(route)=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({token:'test-token'})}));
+await retryPage.goto(RAW_BASE,{waitUntil:'domcontentloaded'});
+await retryPage.waitForFunction(()=>document.querySelector('.connection-ready')&&window.__retryTerminalSocket);
+await retryPage.evaluate(()=>{window.__holdCapabilityProbe=true;document.querySelector('.xterm-term').dataset.retryIdentity='kept';location.hash='#/settings'});
+await retryPage.waitForSelector('.global-settings .hint-action');
+const retrySocketCount=await retryPage.evaluate(()=>window.__retrySockets.length);
+await retryPage.locator('.global-settings .hint-action').click();
+await retryPage.waitForFunction(()=>document.querySelector('.global-settings')?.textContent?.includes('Checking for tmux'));
+ok('retrying the tmux check preserves every running terminal socket',await retryPage.evaluate((count)=>
+  window.__retrySockets.length===count+1&&!window.__retryTerminalSocket.closed&&document.querySelector('.xterm-term')?.dataset.retryIdentity==='kept',retrySocketCount));
+await retryContext.close();
 
 const realLifecycleConfig={version:7,ui:{railWidth:176,railOpen:true,fontSize:13,fontWeight:'regular',notifyOnCommandFinish:false},folders:[
   {id:'title-one',name:'title-one',cwd:'~',theme:'night',icon:null,pattern:'plain',layout:{type:'pane',id:'p-one',command:'bash',persist:false}},
@@ -1670,7 +1759,12 @@ await lifecycleContext.addInitScript((config)=>{
   const frame=(command,text)=>{const data=new TextEncoder().encode(text),out=new Uint8Array(data.length+1);out[0]=command.charCodeAt(0);out.set(data,1);return out.buffer};
   class FakeWebSocket{
     constructor(){this.readyState=0;this.sent=[];window.__fakeSockets.push(this);queueMicrotask(()=>{this.readyState=1;this.onopen?.({})})}
-    send(value){const text=new TextDecoder().decode(value);this.sent.push(text);if(text.startsWith('{'))queueMicrotask(()=>this.onmessage?.({data:frame('0','shell ready\r\n')}))}
+    send(value){
+      const text=new TextDecoder().decode(value);this.sent.push(text);
+      if(text.startsWith('{'))queueMicrotask(()=>this.onmessage?.({data:frame('0','shell ready\r\n')}));
+      const marker=text.match(/__TTYDTERM_PROBE_[a-z0-9]+__/i)?.[0];
+      if(marker)queueMicrotask(()=>this.onmessage?.({data:frame('0','\0'+marker+'\0/home/test\0/work\0/bin/bash\0'+'1\0'+marker+'\0')}));
+    }
     close(){this.readyState=3}
   }
   Object.defineProperty(window,'WebSocket',{value:FakeWebSocket,configurable:true});
@@ -1683,12 +1777,53 @@ ok('ttyd mode keeps the same-origin offline favicon active',await lifecyclePage.
   const link=document.querySelector('link[data-ttydterm-favicon]');return link?.getAttribute('href')?.startsWith('data:image/svg+xml,')&&link.dataset.state==='normal';
 }));
 await lifecyclePage.locator('.surface:not([hidden]) .pane').click();
-await lifecyclePage.waitForFunction(()=>window.__fakeSockets.some((socket)=>socket.sent.some((value)=>value.includes('p-one')))&&
-  window.__fakeSockets.some((socket)=>socket.sent.some((value)=>value.includes('p-two'))));
+await lifecyclePage.waitForFunction(()=>window.__fakeSockets.some((socket)=>socket.sent.some((value)=>value.includes('p-one')&&value.includes('tmux attach-session')))&&
+  window.__fakeSockets.some((socket)=>socket.sent.some((value)=>value.includes('p-two')&&value.includes('tmux attach-session'))));
+const activitySocketCount=await lifecyclePage.evaluate(()=>{const row=document.querySelectorAll('.folder')[1],badge=row.querySelector('.folder-badge'),box=(element)=>{const r=element.getBoundingClientRect();return [r.x,r.y,r.width,r.height]};window.__activityBaseline={row:box(row),badge:box(badge),label:row.querySelector('.folder-main').getAttribute('aria-label')};return window.__fakeSockets.length});
+await lifecyclePage.waitForTimeout(760);
+await lifecyclePage.evaluate(()=>{
+  const socket=window.__fakeSockets.filter((candidate)=>candidate.sent.some((value)=>value.includes('p-two'))).at(-1);
+  const data=new TextEncoder().encode('busy output '.repeat(500)),out=new Uint8Array(data.length+1);out[0]=48;out.set(data,1);socket.onmessage({data:out.buffer});
+});
+await lifecyclePage.waitForFunction(()=>document.querySelectorAll('.folder')[1].className.includes('activity-'));
+ok('output in a hidden mounted workspace animates only its row and never persists activity',await lifecyclePage.evaluate(()=>{
+  const rows=[...document.querySelectorAll('.folder')],config=localStorage.getItem('ttyd-workspace-v2');
+  const row=rows[1],badge=row.querySelector('.folder-badge'),box=(element)=>{const r=element.getBoundingClientRect();return [r.x,r.y,r.width,r.height]},same=(a,b)=>a.every((value,index)=>Math.abs(value-b[index])<.5);
+  return !rows[0].className.includes('activity-')&&row.className.includes('activity-3')&&!config.includes('activity')&&
+    same(box(row),window.__activityBaseline.row)&&same(box(badge),window.__activityBaseline.badge)&&row.querySelector('.folder-main').getAttribute('aria-label')===window.__activityBaseline.label;
+}));
+ok('activity updates do not reconnect terminal sockets',await lifecyclePage.evaluate((count)=>window.__fakeSockets.length===count,activitySocketCount));
+await lifecyclePage.waitForFunction(()=>!document.querySelectorAll('.folder')[1].className.includes('activity-'),null,{timeout:5000});
+ok('activity decoration decays back to idle',true);
+const primarySocket=await lifecyclePage.evaluate(()=>{
+  const socket=window.__fakeSockets.filter((candidate)=>candidate.sent.some((value)=>value.includes('p-one'))).at(-1);return {sent:socket.sent.length};
+});
+await lifecyclePage.locator('.surface:not([hidden]) .pane').click({button:'middle',position:{x:90,y:90}});
+await lifecyclePage.waitForSelector('.copy-toast');
+ok('tmux middle-click sends no mouse report and explains unavailable PRIMARY paste',await lifecyclePage.evaluate(({sent})=>{
+  const socket=window.__fakeSockets.filter((candidate)=>candidate.sent.some((value)=>value.includes('p-one'))).at(-1);
+  return socket.sent.length===sent&&document.querySelector('.copy-toast')?.textContent===window.__primarySelectionHint;
+},primarySocket));
+await lifecyclePage.evaluate(()=>location.hash='#/settings');
+await lifecyclePage.waitForSelector('.global-settings');
+const socketsBeforeFont=await lifecyclePage.evaluate(()=>window.__fakeSockets.length);
+await lifecyclePage.locator('.global-settings .font-groups button',{hasText:'16'}).click();
+ok('changing global font updates xterm without reconnecting sockets',await lifecyclePage.evaluate((count)=>window.__fakeSockets.length===count,socketsBeforeFont));
+await lifecyclePage.locator('.global-settings .font-groups button',{hasText:'13'}).click();
+await lifecyclePage.getByRole('checkbox',{name:'Use tmux when available'}).uncheck();
+await lifecyclePage.waitForFunction((count)=>window.__fakeSockets.length===count+2,socketsBeforeFont);
+ok('changing global tmux policy restarts every terminal and rewrites pane policy',await lifecyclePage.evaluate(()=>{
+  const config=JSON.parse(localStorage.getItem('ttyd-workspace-v2')),values=[];
+  const walk=(node)=>node.type==='pane'?values.push(node.persist):node.children.forEach(walk);config.folders.forEach((folder)=>walk(folder.layout));
+  return !config.ui.useTmux&&values.every((value)=>value===false);
+}));
+await lifecyclePage.locator('.global-settings .btn.primary').click();
+await lifecyclePage.waitForSelector('.global-settings',{state:'detached'});
+await lifecyclePage.locator('.surface:not([hidden]) .pane').click();
 const titleOwnership=await lifecyclePage.evaluate(()=>{
   const frame=(text)=>{const data=new TextEncoder().encode(text),out=new Uint8Array(data.length+1);out[0]=49;out.set(data,1);return out.buffer};
-  const one=window.__fakeSockets.find((socket)=>socket.sent.some((value)=>value.includes('p-one')));
-  const two=window.__fakeSockets.find((socket)=>socket.sent.some((value)=>value.includes('p-two')));
+  const one=window.__fakeSockets.filter((socket)=>socket.sent.some((value)=>value.includes('p-one'))).at(-1);
+  const two=window.__fakeSockets.filter((socket)=>socket.sent.some((value)=>value.includes('p-two'))).at(-1);
   one.onmessage({data:frame('foreground')});const foreground=document.title;
   two.onmessage({data:frame('background')});return {foreground,afterBackground:document.title};
 });
@@ -1730,7 +1865,7 @@ await deniedPage.goto(BASE,{waitUntil:'networkidle'});
 await deniedPage.locator('.rail-global[aria-label="Global settings"]').click();
 await deniedPage.waitForSelector('dialog[open] .global-settings');
 ok('denied notification permission leaves the setting off, disabled, and explained',await deniedPage.evaluate(()=>{
-  const box=document.querySelector('.global-settings input[type=checkbox]');
+  const box=[...document.querySelectorAll('.global-settings input[type=checkbox]')].find((input)=>input.closest('.field')?.textContent.includes('Notify when commands finish'));
   return box?.disabled===true && box.checked===false && document.querySelector('.global-settings')?.textContent.includes('browser settings') &&
     JSON.parse(localStorage.getItem('ttyd-workspace-v2')).ui.notifyOnCommandFinish===false;
 }));
@@ -1744,6 +1879,8 @@ ok('reduced motion skips the skeleton', (await rmPage.locator('.term.skeleton').
 const rmAnim = await rmPage.locator('.surface:not([hidden]) .pane').first()
   .evaluate((el) => getComputedStyle(el).animationName);
 ok('reduced motion disables pane entrance animation', rmAnim === 'none', rmAnim);
+const reducedActivity=await rmPage.locator('.folder').first().evaluate((row)=>{const layer=document.createElement('span');layer.className='folder-activity';row.append(layer);const name=getComputedStyle(layer).animationName;layer.remove();return name});
+ok('reduced motion keeps workspace activity static',reducedActivity==='none',reducedActivity);
 await rmPage.close();
 
 console.log('\nerrors seen: ' + (errors.length ? errors.join(' | ') : 'none'));

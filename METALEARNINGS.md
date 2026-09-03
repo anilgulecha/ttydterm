@@ -229,3 +229,20 @@ These rules apply to terminal workspaces and other single-file browser tools.
 68. Overlay controls must not buy visibility with permanent content padding. Reveal
     them only inside a bounded discovery area, keep the resource surface full-size,
     and preserve a keyboard focus path that does not move the content beneath it.
+
+69. Sync a local form draft to stable entity identity, not object reference. Parent
+    rerenders routinely create equivalent objects and must not erase active typing.
+
+70. A selected pane and a focused terminal input are different states. Pointer
+    activation should update both, while embedded controls retain their own focus.
+
+71. Temporary visual suspension must preserve live and animated descendants. Toggle
+    visibility on stable nodes so resize cannot reconnect clients or replay entrances.
+
+72. Give responsive pane geometry and terminal fitting one ordered resize path. Commit
+    the final rail and frame dimensions before paint, then report each distinct PTY grid
+    once so a terminal multiplexer performs only its necessary redraw.
+
+73. Window-manager maximize events can expose several valid viewport sizes. Keep visual
+    geometry responsive, but wait for a short quiet period before fitting the emulator
+    and PTY so intermediate grids do not make full-screen applications redraw twice.

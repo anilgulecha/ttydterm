@@ -106,10 +106,10 @@ ok('social previews use the published product screenshot', await page.evaluate((
     content('meta[name="twitter:image"]')==='https://www.gulecha.org/ttydterm/docs/ttydterm.png';
 }));
 ok('hash route settled on a folder', /#\/f\//.test(page.url()), page.url());
-ok('release 1.6.1 is a compact superscript beside the wordmark and exposed on the shell',await page.evaluate(()=>
-  document.querySelector('.brand-version')?.textContent==='1.6.1'&&
-  document.querySelector('.brand-version')?.getAttribute('aria-label')==='version 1.6.1'&&
-  document.querySelector('.shell')?.getAttribute('data-version')==='1.6.1'));
+ok('release 1.7.0 is a compact superscript beside the wordmark and exposed on the shell',await page.evaluate(()=>
+  document.querySelector('.brand-version')?.textContent==='1.7.0'&&
+  document.querySelector('.brand-version')?.getAttribute('aria-label')==='version 1.7.0'&&
+  document.querySelector('.shell')?.getAttribute('data-version')==='1.7.0'));
 const faviconBoot=await page.evaluate(()=>{
   const links=[...document.querySelectorAll('link[rel~="icon"]')],link=links[0],href=link?.getAttribute('href')||'';
   return {count:links.length,state:link?.dataset.state,href,svg:href.startsWith('data:image/svg+xml,')?decodeURIComponent(href.slice(href.indexOf(',')+1)):''};
@@ -173,7 +173,7 @@ ok('the collapse control shares the workspace icon column', await page.evaluate(
 ok('the release uses a light superscript pill immediately after ttydterm',await page.evaluate(()=>{
   const name=document.querySelector('.brand-name'),badge=document.querySelector('.brand-version');if(!badge||!name)return false;
   const b=badge.getBoundingClientRect(),n=name.getBoundingClientRect(),style=getComputedStyle(badge);
-  return badge.textContent==='1.6.1'&&b.left>=n.right&&b.top<n.top+n.height/2&&b.height<n.height&&parseFloat(style.borderRadius)>=6&&style.boxShadow!=='none';
+  return badge.textContent==='1.7.0'&&b.left>=n.right&&b.top<n.top+n.height/2&&b.height<n.height&&parseFloat(style.borderRadius)>=6&&style.boxShadow!=='none';
 }));
 ok('workspace icons have no decorative line markers',await page.evaluate(()=>
   [...document.querySelectorAll('.folder-badge')].every((badge)=>getComputedStyle(badge,'::after').content==='none')));
@@ -569,11 +569,22 @@ await page.keyboard.press('Escape');
 ok('Escape closes the right-click pane menu and returns focus to the terminal pane',await page.evaluate(()=>
   document.querySelector('.panepop')===null&&document.activeElement?.classList.contains('pane')));
 await firstPane.click({ button: 'right', position: { x: 80, y: 100 } });
+await page.evaluate(()=>{
+  window.__preSplitPaneIds=new Set([...document.querySelectorAll('.surface:not([hidden]) .pane')].map((pane)=>pane.dataset.paneId));
+  window.__splitAnimationStarts=[];
+  document.querySelector('.surface:not([hidden])')?.addEventListener('animationstart',(event)=>{
+    if(['term-in','pane-in','shimmer'].includes(event.animationName))window.__splitAnimationStarts.push({name:event.animationName,paneId:event.target.closest('.pane')?.dataset.paneId});
+  },true);
+});
 await page.locator('.panepop .pico[aria-label="Split into 3 columns"]').click();
 await page.waitForTimeout(160);
 const afterSplit = await page.locator('.surface:not([hidden]) .pane').count();
 ok('splitting into 3 columns adds 2 panes', afterSplit === 5, String(afterSplit));
 await page.waitForSelector('.surface:not([hidden]) .term.skeleton', { state: 'detached' });
+await page.waitForFunction(()=>!document.querySelector('.surface:not([hidden]) :is(.pane.entering,.term-entering)'));
+ok('only genuinely new split panes receive entrance animations',await page.evaluate(()=>
+  window.__splitAnimationStarts.length>0&&window.__splitAnimationStarts.every((event)=>event.paneId&&!window.__preSplitPaneIds.has(event.paneId))),
+  await page.evaluate(()=>window.__splitAnimationStarts.map((event)=>event.name+':'+event.paneId).join(', ')));
 
 const splitCmds = await page.evaluate(() => {
   const panes = [...document.querySelectorAll('.surface:not([hidden]) .pane')];
@@ -596,6 +607,19 @@ ok('fresh split panes default to tmux when it is detected',await page.evaluate((
 await page.screenshot({ path: `${SHOTS}/02-split-3-columns.png` });
 
 console.log('\nresize');
+await page.evaluate(()=>{
+  window.__resizeAnimationStarts=[];
+  document.querySelector('.surface:not([hidden])')?.addEventListener('animationstart',(event)=>{
+    if(['term-in','pane-in','shimmer'].includes(event.animationName))window.__resizeAnimationStarts.push(event.animationName);
+  },true);
+  window.__resizeTerminalNodes=[...document.querySelectorAll('.surface:not([hidden]) .pane')].map((pane)=>({
+    pane,term:pane.querySelector('.term'),body:pane.querySelector('.term-body'),host:pane.querySelector('.xterm-host'),
+  }));
+});
+await page.setViewportSize({width:1420,height:880});await page.waitForTimeout(80);
+ok('viewport fitting starts no terminal entrance animation',await page.evaluate(()=>window.__resizeAnimationStarts.length===0),
+  await page.evaluate(()=>window.__resizeAnimationStarts.join(', ')));
+await page.setViewportSize({width:1440,height:900});await page.waitForTimeout(80);
 const divider = page.locator('.surface:not([hidden]) .divider').first();
 const widthOfLeftNeighbour=()=>divider.evaluate((element)=>{
   const d=element.getBoundingClientRect(),panes=[...element.parentElement.querySelectorAll('.pane')]
@@ -619,9 +643,17 @@ await page.mouse.down();
 await page.mouse.move(dragBox.x + 40, dragBox.y + dragBox.height / 2);
 ok('pane contents become resize placeholders during drag',
   (await page.locator('.surface:not([hidden]) .resize-placeholder').count()) === afterSplit);
+ok('divider suspension keeps every terminal body mounted',await page.evaluate(()=>(
+  document.querySelectorAll('.surface:not([hidden]) .term-body').length===window.__resizeTerminalNodes.filter((item)=>item.body).length)));
 await page.mouse.up();
 await page.waitForTimeout(60);
 ok('terminal contents return after resize release',(await page.locator('.surface:not([hidden]) .resize-placeholder').count())===0);
+ok('divider resize preserves terminal nodes and replays no animation',await page.evaluate(()=>{
+  const panes=[...document.querySelectorAll('.surface:not([hidden]) .pane')];
+  return window.__resizeAnimationStarts.length===0&&window.__resizeTerminalNodes.every((item,index)=>{
+    const pane=panes[index];return pane===item.pane&&pane.querySelector('.term')===item.term&&pane.querySelector('.term-body')===item.body&&pane.querySelector('.xterm-host')===item.host;
+  });
+}),await page.evaluate(()=>window.__resizeAnimationStarts.join(', ')));
 const cancelDividerBox=await divider.boundingBox();await page.mouse.move(cancelDividerBox.x+cancelDividerBox.width/2,cancelDividerBox.y+cancelDividerBox.height/2);await page.mouse.down();await page.mouse.move(cancelDividerBox.x+30,cancelDividerBox.y+cancelDividerBox.height/2);
 await divider.evaluate((element)=>element.dispatchEvent(new PointerEvent('pointercancel',{pointerId:1,bubbles:true})));
 ok('divider pointer cancellation restores terminal contents',await page.evaluate(()=>!document.querySelector('.divider.dragging')&&!document.querySelector('.resize-placeholder')));await page.mouse.up();
@@ -653,7 +685,9 @@ const sourceBefore=await slotOf(exchangeSource),targetBefore=await slotOf(exchan
 await exchangeSource.evaluate((pane)=>pane.querySelector('.term').dataset.exchangeIdentity='source-kept');
 const sourceGrip=exchangeSource.locator('.pane-grip button');
 const gripBox=await sourceGrip.boundingBox();
-await page.mouse.move(gripBox.x+gripBox.width/2,gripBox.y+gripBox.height/2);await page.mouse.down();
+await page.mouse.move(gripBox.x+gripBox.width/2,gripBox.y+gripBox.height/2);
+await page.waitForFunction((id)=>getComputedStyle(document.querySelector(`[data-pane-id="${id}"] .pane-grip button`)).pointerEvents==='auto',sourceId);
+await page.mouse.down();
 const exchangeViewport=page.viewportSize();
 await page.mouse.move(Math.min(targetScreen.x+targetScreen.width/2,exchangeViewport.width-20),Math.min(targetScreen.y+targetScreen.height/2,exchangeViewport.height-20),{steps:8});
 ok('pane exchange blanks every terminal without unmounting its content',await page.evaluate(({sourceId,count})=>
@@ -672,7 +706,8 @@ ok('releasing exchanges complete panes across layout slots',sameBox(sourceAfter,
 ok('pane exchange preserves mounted pane identity and persists the nested swap',await page.evaluate(({sourceId,targetId})=>{
   const source=document.querySelector(`[data-pane-id="${sourceId}"]`),config=JSON.parse(localStorage.getItem('ttyd-workspace-v2')),folder=config.folders.find((item)=>item.id==='f-jr');
   const ids=[];const walk=(node)=>node.type==='pane'?ids.push(node.id):node.children.forEach(walk);walk(folder.layout);
-  return source?.querySelector('.term')?.dataset.exchangeIdentity==='source-kept'&&ids.includes(sourceId)&&ids.includes(targetId)&&!document.querySelector('.resize-placeholder');
+  return source?.querySelector('.term')?.dataset.exchangeIdentity==='source-kept'&&ids.includes(sourceId)&&ids.includes(targetId)&&!document.querySelector('.resize-placeholder')&&
+    window.__resizeAnimationStarts.length===0&&window.__resizeTerminalNodes.every((item)=>document.contains(item.pane)&&item.pane.querySelector('.term')===item.term&&item.pane.querySelector('.term-body')===item.body);
 },{sourceId,targetId}));
 const keyboardSource=page.locator(`[data-pane-id="${sourceId}"] .pane-grip button`);await keyboardSource.focus();await keyboardSource.press('Enter');
 await page.waitForSelector(`[data-pane-id="${sourceId}"].exchange-source`);await keyboardSource.press('ArrowLeft');
@@ -770,6 +805,9 @@ const railAfter = await railW();
 ok('dragging widens the sidebar',railAfter>railBefore+50,`${Math.round(railBefore)} -> ${Math.round(railAfter)}`);
 const railCancelBox=await rz.boundingBox();await page.mouse.move(railCancelBox.x+railCancelBox.width/2,railCancelBox.y+220);await page.mouse.down();await page.mouse.move(railCancelBox.x+30,railCancelBox.y+220);await rz.evaluate((element)=>element.dispatchEvent(new PointerEvent('pointercancel',{pointerId:1,bubbles:true})));
 ok('sidebar resize cancellation restores terminal contents',await page.evaluate(()=>!document.querySelector('.rail-gutter.dragging')&&!document.querySelector('.resize-placeholder')));await page.mouse.up();
+ok('sidebar resize preserves existing terminal nodes and starts no entrance animation',await page.evaluate(()=>
+  window.__resizeAnimationStarts.length===0&&window.__resizeTerminalNodes.every((item)=>document.contains(item.pane)&&item.pane.querySelector('.term')===item.term&&item.pane.querySelector('.term-body')===item.body)),
+  await page.evaluate(()=>window.__resizeAnimationStarts.join(', ')));
 
 await rz.focus();
 ok('rail resizer exposes separator semantics',await rz.evaluate((el)=>
@@ -1282,6 +1320,15 @@ ok('closing backup returns to the same folder',
 const folderCountBefore = await page.locator('.folder').count();
 await page.locator('.ico[aria-label="New workspace"]').click();
 await page.waitForSelector('dialog[open]');
+const newWorkspaceInputs=page.locator('dialog[open] input[type=text]');
+await newWorkspaceInputs.nth(0).fill('~/typed/without-blur');
+await newWorkspaceInputs.nth(1).fill('draft survives activity');
+await page.evaluate(({folderId,paneId})=>window.__reportCommandCompletion({folderId,paneId,exitStatus:0,duration:6000}),firstCompletion);
+await page.waitForTimeout(400);
+ok('an unrelated app rerender does not reset or defocus a new-workspace draft',
+  await newWorkspaceInputs.nth(0).inputValue()==='~/typed/without-blur'&&
+  await newWorkspaceInputs.nth(1).inputValue()==='draft survives activity'&&
+  await newWorkspaceInputs.nth(1).evaluate((input)=>document.activeElement===input));
 ok('new-workspace route is not stomped', /#\/new/.test(page.url()), page.url());
 const duringNew = await page.locator('.folder.active .folder-name').textContent();
 ok('active folder survives behind #/new', duringNew === beforeDialogs, `${beforeDialogs} -> ${duringNew}`);
@@ -1295,6 +1342,9 @@ ok('cancel kept the active folder',
 
 await page.locator('.ico[aria-label="New workspace"]').click();
 await page.waitForSelector('dialog[open]');
+ok('cancelled new-workspace drafts reopen with fresh defaults',
+  await page.locator('dialog[open] input[type=text]').nth(0).inputValue()==='~/'&&
+  await page.locator('dialog[open] input[type=text]').nth(1).inputValue()==='');
 await page.locator('dialog[open] input[type=text]').nth(1).fill('global-tmux-workspace');
 await page.locator('dialog[open] .btn.primary', {hasText:'Create'}).click();
 await page.waitForTimeout(180);
@@ -1586,9 +1636,10 @@ ok('documentation renders as plain monospace terminal file output', !!docTypogra
   docTypography.leadBackground==='rgba(0, 0, 0, 0)'&&docTypography.codeBackground==='rgba(0, 0, 0, 0)'&&
   docTypography.leadRadius==='0px'&&docTypography.codeRadius==='0px',JSON.stringify(docTypography));
 const readmeText=await readmePanes.allTextContents();
-ok('README combines features, keyboard controls, and issue-only contributions',
-  readmeText.some((text)=>text.includes('Workspaces:')&&text.includes('Hackable:')&&text.includes("I've set up the base"))&&
-  readmeText.some((text)=>text.includes('Alt + 1…9')&&text.includes('Ctrl/⌘ + Shift + ,'))&&
+ok('README combines current features, keyboard controls, and issue-only contributions',
+  readmeText.some((text)=>text.includes('reorderable workspaces')&&text.includes('live pane exchange')&&text.includes('private completion alerts'))&&
+  readmeText.some((text)=>text.includes('Workspaces:')&&text.includes('exchange live terminals without reconnecting them')&&text.includes('Hackable:')&&text.includes("I've set up the base"))&&
+  readmeText.some((text)=>text.includes('switch workspace and restore its last pane')&&text.includes('Middle-click keeps native PRIMARY-selection paste')&&text.includes('Ctrl/⌘ + Shift + ,'))&&
   readmeText.some((text)=>text.includes('contributions only as issues')&&text.includes('Please do not open pull requests')&&text.includes('send me an email note')));
 ok('every feature starts with a bold headline',await demo.evaluate(()=>{
   const pane=document.querySelectorAll('.surface:not([hidden]) .pane')[1];
@@ -1612,16 +1663,23 @@ ok('canonical launch command stays direct and blocks URL child arguments',
 await demo.locator('.folder', { hasText: 'Using it' }).click();
 await demo.waitForSelector('.surface:not([hidden]) .doc-term[data-doc="using"]');
 const usingText = await demo.locator('.surface:not([hidden]) .doc-body').textContent();
-ok('Using it includes four scoped package managers, download, localhost auth and tmux limits',
+ok('Using it includes installation, localhost authentication, global tmux policy, and continuity limits',
   ['brew install ttyd tmux','sudo apt install ttyd tmux','sudo dnf install ttyd tmux','sudo pacman -S ttyd tmux',
    'curl -fL https://www.gulecha.org/ttydterm/index.html','http://localhost:7681',
-   'Replace user:password with credentials you choose','PATH used by ttyd’s login shell','command -v tmux',
+   'Replace user:password with credentials you choose','It applies to every pane; changing it restarts every terminal',
+   'panes reconnect to the same sessions','PATH used by ttyd’s login shell','command -v tmux',
    'while the tmux server and session run'].every((text) => usingText.includes(text)));
 ok('Using it renders the exact banner launch command',
   (await demo.locator('.surface:not([hidden]) .doc-command code').last().textContent()) === bannerCommand);
 
 await demo.locator('.folder', { hasText: 'Themes' }).click();
 await demo.waitForSelector('.surface:not([hidden]) .doc-themes .theme-opt');
+ok('Themes documents workspace appearance overrides and global font defaults',await demo.evaluate(()=>{
+  const text=document.querySelector('.surface:not([hidden]) .doc-body')?.textContent||'';
+  return text.includes('theme, pattern, and optional terminal font size')&&
+    text.includes('workspace settings control theme, pattern, and an optional font-size override')&&
+    text.includes('Global settings control app-wide font size and weight, tmux, and notifications');
+}));
 ok('Themes opens on the first built-in theme', await demo.evaluate(() =>
   document.querySelector('.surface:not([hidden]) .theme-opt[aria-checked="true"]')?.getAttribute('aria-label') === 'Theme night'));
 const themeBefore = await demo.locator('.shell').evaluate((el) => getComputedStyle(el).backgroundColor);
@@ -1792,6 +1850,9 @@ await narrowPreferencePage.locator('.rail-toggle[aria-label="Show sidebar"]').cl
 ok('the auto-collapsed sidebar can be opened temporarily on a narrow screen',
   (await narrowPreferencePage.locator('.rail:not(.collapsed)').count())===1&&
   await narrowPreferencePage.evaluate(()=>JSON.parse(localStorage.getItem('ttyd-workspace-v2')).ui.railOpen===true));
+await narrowPreferencePage.setViewportSize({width:640,height:700});await narrowPreferencePage.waitForTimeout(50);
+ok('resizing within the narrow breakpoint preserves its temporary sidebar choice',
+  (await narrowPreferencePage.locator('.rail:not(.collapsed)').count())===1);
 await narrowPreferencePage.setViewportSize({width:1440,height:900});
 await narrowPreferencePage.waitForFunction(()=>document.querySelector('.rail:not(.collapsed)'));
 ok('leaving the narrow viewport restores the saved sidebar preference',
@@ -1897,6 +1958,31 @@ ok('ttyd mode keeps the same-origin offline favicon active',await lifecyclePage.
 await lifecyclePage.locator('.surface:not([hidden]) .pane').click();
 await lifecyclePage.waitForFunction(()=>window.__fakeSockets.some((socket)=>socket.sent.some((value)=>value.includes('p-one')&&value.includes('tmux attach-session')))&&
   window.__fakeSockets.some((socket)=>socket.sent.some((value)=>value.includes('p-two')&&value.includes('tmux attach-session'))));
+const resizeSocketBaseline=await lifecyclePage.evaluate(()=>{
+  window.__resizeFirstFrames=[];
+  addEventListener('resize',()=>requestAnimationFrame(()=>{
+    const pane=document.querySelector('.surface:not([hidden]) .pane')?.getBoundingClientRect(),viewport=document.querySelector('.surface:not([hidden]) .viewport')?.getBoundingClientRect();
+    window.__resizeFirstFrames.push({pane:pane?.width,viewport:viewport?.width,rail:document.querySelector('.rail')?.getBoundingClientRect().width});
+  }));
+  const socket=window.__fakeSockets.find((candidate)=>candidate.sent.some((value)=>value.includes('p-one')));
+  return {count:window.__fakeSockets.length,resizes:socket.sent.filter((value)=>value.startsWith('1{')).length};
+});
+await lifecyclePage.setViewportSize({width:1100,height:800});await lifecyclePage.waitForTimeout(45);
+await lifecyclePage.setViewportSize({width:900,height:700});await lifecyclePage.waitForTimeout(45);
+await lifecyclePage.setViewportSize({width:700,height:760});await lifecyclePage.waitForTimeout(70);
+ok('maximize-style width and height changes commit final pane geometry before paint',await lifecyclePage.evaluate(()=>{
+  const frame=window.__resizeFirstFrames.at(-1);return !!frame&&frame.rail===52&&Math.abs(frame.pane-frame.viewport)<.5;
+}),await lifecyclePage.evaluate(()=>JSON.stringify(window.__resizeFirstFrames)));
+ok('a browser resize burst sends no intermediate PTY sizes',await lifecyclePage.evaluate((baseline)=>{
+  const socket=window.__fakeSockets.find((candidate)=>candidate.sent.some((value)=>value.includes('p-one')));
+  return window.__fakeSockets.length===baseline.count&&socket.sent.filter((value)=>value.startsWith('1{')).length===baseline.resizes;
+},resizeSocketBaseline));
+await lifecyclePage.waitForTimeout(120);
+ok('a settled maximize-style burst sends one final distinct PTY size',await lifecyclePage.evaluate((baseline)=>{
+  const socket=window.__fakeSockets.find((candidate)=>candidate.sent.some((value)=>value.includes('p-one'))),sizes=socket.sent.filter((value)=>value.startsWith('1{'));
+  return window.__fakeSockets.length===baseline.count&&sizes.length===baseline.resizes+1&&new Set(sizes).size===sizes.length;
+},resizeSocketBaseline),await lifecyclePage.evaluate(()=>window.__fakeSockets.find((candidate)=>candidate.sent.some((value)=>value.includes('p-one'))).sent.filter((value)=>value.startsWith('1{')).join(' | ')));
+await lifecyclePage.setViewportSize({width:1440,height:900});await lifecyclePage.waitForTimeout(180);
 const activitySocketCount=await lifecyclePage.evaluate(()=>{const row=document.querySelectorAll('.folder')[1],badge=row.querySelector('.folder-badge'),box=(element)=>{const r=element.getBoundingClientRect();return [r.x,r.y,r.width,r.height]};window.__activityBaseline={row:box(row),badge:box(badge),label:row.querySelector('.folder-main').getAttribute('aria-label')};return window.__fakeSockets.length});
 await lifecyclePage.waitForTimeout(760);
 await lifecyclePage.evaluate(()=>{
@@ -1994,7 +2080,24 @@ const exchangeLifecyclePage=await exchangeLifecycleContext.newPage();
 await exchangeLifecyclePage.route('**/token',(route)=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({token:'test-token'})}));
 await exchangeLifecyclePage.goto(RAW_BASE,{waitUntil:'domcontentloaded'});await exchangeLifecyclePage.waitForFunction(()=>document.querySelectorAll('.connection-ready').length===4);
 const exchangeSocketBaseline=await exchangeLifecyclePage.evaluate(()=>({count:window.__exchangeSockets.length,terminals:window.__exchangeSockets.filter((socket)=>socket.sent.some((text)=>text.includes('real-')))}));
-const realASource=exchangeLifecyclePage.locator('[data-pane-id="real-a"]'),realCTarget=exchangeLifecyclePage.locator('[data-pane-id="real-c"]'),realGrip=realASource.locator('.pane-grip button'),realGripBox=await realGrip.boundingBox(),realTargetBox=await realCTarget.boundingBox();
+await exchangeLifecyclePage.evaluate(()=>Object.defineProperty(navigator,'clipboard',{configurable:true,value:{readText:async()=> 'focus-b'}}));
+const realASource=exchangeLifecyclePage.locator('[data-pane-id="real-a"]'),realBPane=exchangeLifecyclePage.locator('[data-pane-id="real-b"]'),realCTarget=exchangeLifecyclePage.locator('[data-pane-id="real-c"]');
+await realASource.click({position:{x:100,y:100}});
+await realBPane.click({position:{x:3,y:80}});
+ok('clicking pane padding transfers both pane ownership and actual xterm input focus',await exchangeLifecyclePage.evaluate(()=>{
+  const pane=document.activeElement?.closest('.pane');return pane?.dataset.paneId==='real-b'&&pane.classList.contains('focused')&&document.activeElement?.classList.contains('xterm-helper-textarea');
+}));
+await realASource.click({position:{x:100,y:100}});
+await realBPane.click({button:'right',position:{x:80,y:80}});await exchangeLifecyclePage.waitForSelector('[data-pane-id="real-b"] .panepop');
+ok('right-click activates the destination pane while its custom menu takes keyboard focus',await exchangeLifecyclePage.evaluate(()=>
+  document.querySelector('[data-pane-id="real-b"]')?.classList.contains('focused')&&document.activeElement?.closest('[data-pane-id="real-b"] .panepop')));
+await realBPane.locator('.panepop [aria-label="Paste"]').click();await exchangeLifecyclePage.waitForFunction(()=>document.activeElement?.closest('.pane')?.dataset.paneId==='real-b'&&document.activeElement?.classList.contains('xterm-helper-textarea'));
+ok('right-click Paste sends input only to its pane and leaves that xterm focused',await exchangeLifecyclePage.evaluate(()=>{
+  const socket=(id)=>window.__exchangeSockets.filter((candidate)=>candidate.sent.some((text)=>text.includes(id))).at(-1);
+  return socket('real-b').sent.some((text)=>text.includes('focus-b'))&&!socket('real-a').sent.some((text)=>text.includes('focus-b'))&&
+    document.activeElement?.closest('.pane')?.dataset.paneId==='real-b';
+}));
+const realGrip=realASource.locator('.pane-grip button'),realGripBox=await realGrip.boundingBox(),realTargetBox=await realCTarget.boundingBox();
 await exchangeLifecyclePage.mouse.move(realGripBox.x+realGripBox.width/2,realGripBox.y+realGripBox.height/2);await exchangeLifecyclePage.mouse.down();await exchangeLifecyclePage.mouse.move(realTargetBox.x+realTargetBox.width/2,realTargetBox.y+realTargetBox.height/2,{steps:8});
 ok('real pane exchange suspends visuals without closing terminal sockets',await exchangeLifecyclePage.evaluate(()=>document.querySelectorAll('.surface:not([hidden]) .xterm-suspended').length===3&&window.__exchangeSockets.filter((socket)=>socket.sent.some((text)=>text.includes('real-'))).every((socket)=>!socket.closed)));
 await exchangeLifecyclePage.mouse.up();await exchangeLifecyclePage.waitForTimeout(80);

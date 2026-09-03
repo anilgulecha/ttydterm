@@ -447,6 +447,8 @@
 
   .resize-placeholder { display: block; }
   .resize-placeholder::after { content: none; }
+  /* Layout interaction blanks terminals without replacing their live or animated DOM. */
+  .resize-placeholder > * { visibility:hidden;pointer-events:none; }
 
 
   .ls { display: grid; column-gap: 2ch; }
@@ -461,7 +463,7 @@
   .term.skeleton { display:flex;flex-direction:column;gap:9px;padding-top:13px; }
   .sk-line { height: 8px; border-radius: 4px; background: var(--t-skel); }
   .sk-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 9px; }
-  .term-body { animation: term-in .22s ease-out both; }
+  .term-body.term-entering { animation: term-in .22s ease-out both; }
 
 
   .pane-hotspot { position:absolute; top:0; right:0; width:54px; height:54px; z-index:3; }
@@ -544,7 +546,7 @@
 
 
   @media (prefers-reduced-motion: no-preference) {
-    .pane { animation: pane-in .14s linear both; }
+    .pane.entering { animation: pane-in .14s linear both; }
     .pane.closing { animation: pane-out .14s linear both; pointer-events: none; }
     .sk-line { animation: shimmer 1s ease-in-out infinite alternate; }
   }

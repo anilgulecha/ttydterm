@@ -46,6 +46,7 @@ const ACTIVITY_REFERENCE = 4096;   // rolling bytes that saturate the top level
 const ACTIVITY_LEVELS = 3;
 const ACTIVITY_GRACE_MS = 700;     // startup banner/launch echo is not user activity
 const PRIMARY_SELECTION_HINT = 'Primary selection paste is unavailable here. Use right-click Paste.';
+const BROWSER_RESIZE_SETTLE_MS = 140;
 window.__primarySelectionHint = PRIMARY_SELECTION_HINT;
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
@@ -370,12 +371,14 @@ const pasteIntoTerminal = (term:XtermTerminal, text:string) => {
 };
 window.__pasteIntoTerminal=pasteIntoTerminal;
 
-function RealTerminal({ folder, pane, runtime, active, suspended, titleOwner, useTmux, onCommandComplete, onOutputActivity }: {
+function RealTerminal({ folder, pane, runtime, active, suspended, fitDeferred, layoutSize, titleOwner, useTmux, onCommandComplete, onOutputActivity }: {
   folder: Folder;
   pane: PaneNode;
   runtime: Runtime;
   active: boolean;
   suspended: boolean;
+  fitDeferred: boolean;
+  layoutSize: string;
   titleOwner: boolean;
   useTmux: boolean;
   onCommandComplete: (event:CommandCompletion) => void;
@@ -406,12 +409,16 @@ function RealTerminal({ folder, pane, runtime, active, suspended, titleOwner, us
     });
     term.open(hostEl);fit.fit();
     const encoder=new TextEncoder(),decoder=new TextDecoder();
-    const socket=new WebSocket(runtime.endpoints.ws,['tty']);socket.binaryType='arraybuffer';let initialized=false,activityReadyAt=0;
+    const socket=new WebSocket(runtime.endpoints.ws,['tty']);socket.binaryType='arraybuffer';let initialized=false,activityReadyAt=0,lastReportedSize='';
     const sendInput=(data: string)=>{if(socket.readyState!==1)return;const bytes=encoder.encode(data),payload=new Uint8Array(bytes.length+1);payload[0]=48;payload.set(bytes,1);socket.send(payload)};
-    socket.onopen=()=>{socket.send(encoder.encode(JSON.stringify({AuthToken:runtime.token,columns:term.cols,rows:term.rows})));setState('starting')};
+    socket.onopen=()=>{lastReportedSize=term.cols+'x'+term.rows;socket.send(encoder.encode(JSON.stringify({AuthToken:runtime.token,columns:term.cols,rows:term.rows})));setState('starting')};
     socket.onmessage=(event: MessageEvent<ArrayBuffer>)=>{const bytes=new Uint8Array(event.data),command=String.fromCharCode(bytes[0]),data=bytes.slice(1);if(command==='0'){term.write(data);if(!initialized){initialized=true;activityReadyAt=Date.now()+ACTIVITY_GRACE_MS;const launch=paneLaunchCommand({cwd:folder.cwd,command:pane.command,persist:useTmux,folderLabel:folderLabel(folder),paneId:pane.id,shellIntegration:true});sendInput(`${launch}\r`);setState('ready')}else if(Date.now()>=activityReadyAt)onOutputActivity(folder.id,data.byteLength)}else if(command==='1'){paneTitle.current=decoder.decode(data)+' · ttydterm';if(titleOwnerRef.current){document.title=paneTitle.current;appliedTitle.current=paneTitle.current}}};
     socket.onclose=()=>setState('disconnected');socket.onerror=()=>setState('error');
-    const input=term.onData(sendInput),resize=term.onResize(({cols,rows})=>socket.readyState===1&&socket.send(encoder.encode('1'+JSON.stringify({columns:cols,rows}))));
+    const input=term.onData(sendInput),resize=term.onResize(({cols,rows})=>{
+      if(socket.readyState!==1)return;
+      const next=cols+'x'+rows;if(next===lastReportedSize)return;lastReportedSize=next;
+      socket.send(encoder.encode('1'+JSON.stringify({columns:cols,rows})));
+    });
     let toastTimer:ReturnType<typeof setTimeout>,primaryTimer:ReturnType<typeof setTimeout>;
     const showToast=(text:string)=>{setToast(text);clearTimeout(toastTimer);toastTimer=setTimeout(()=>setToast(null),2200)};
     const pasteText=(text:string)=>pasteIntoTerminal(term,text);
@@ -423,8 +430,8 @@ function RealTerminal({ folder, pane, runtime, active, suspended, titleOwner, us
     hostEl.addEventListener('paste',nativePaste);hostEl.addEventListener('ttydterm-paste',menuPaste);hostEl.addEventListener('ttydterm-focus',focusTerminal);hostEl.addEventListener('ttydterm-primary-selection',primarySelection);
     term.attachCustomKeyEventHandler((event:KeyboardEvent)=>{if((event.ctrlKey||event.metaKey)&&event.shiftKey&&event.key.toLowerCase()==='v'&&event.type==='keydown'){void readClipboard();return false}return true});
     const selection=term.onSelectionChange(async()=>{const text=term.getSelection();if(!text)return;try{await navigator.clipboard.writeText(text);showToast('Copied')}catch{}});
-    const ro=new ResizeObserver(()=>{try{fit.fit()}catch{}});ro.observe(hostEl);client.current={term,fit,socket};
-    return()=>{clearTimeout(toastTimer);clearTimeout(primaryTimer);hostEl.removeEventListener('paste',nativePaste);hostEl.removeEventListener('ttydterm-paste',menuPaste);hostEl.removeEventListener('ttydterm-focus',focusTerminal);hostEl.removeEventListener('ttydterm-primary-selection',primarySelection);ro.disconnect();input.dispose();resize.dispose();selection.dispose();shellEvents.dispose();socket.close(1000);term.dispose();client.current=null};
+    client.current={term,fit,socket};
+    return()=>{clearTimeout(toastTimer);clearTimeout(primaryTimer);hostEl.removeEventListener('paste',nativePaste);hostEl.removeEventListener('ttydterm-paste',menuPaste);hostEl.removeEventListener('ttydterm-focus',focusTerminal);hostEl.removeEventListener('ttydterm-primary-selection',primarySelection);input.dispose();resize.dispose();selection.dispose();shellEvents.dispose();socket.close(1000);term.dispose();client.current=null};
   },[folder.cwd,folder.id,pane.id,pane.command,useTmux,runtime.mode,runtime.mode==='ttyd'?runtime.token:null,onCommandComplete,onOutputActivity]);
 
   useLayoutEffect(()=>{
@@ -441,8 +448,11 @@ function RealTerminal({ folder, pane, runtime, active, suspended, titleOwner, us
     else if(appliedTitle.current){if(document.title===appliedTitle.current)document.title='ttydterm';appliedTitle.current=''}
     return()=>{if(appliedTitle.current&&document.title===appliedTitle.current)document.title='ttydterm';appliedTitle.current=''};
   },[titleOwner]);
-  useEffect(()=>{if(active&&!suspended)try{client.current?.fit.fit()}catch{}},[active,suspended]);
-  return <div className={'term xterm-term pattern-'+(folder.pattern||'plain')+(useTmux?' tmux-terminal':'')+' connection-'+state+(suspended?' xterm-suspended':'')} aria-label={'Terminal '+state}><div className="xterm-host" ref={host}/>{state==='ready'?null:<div className="connection-state">{state}</div>}{toast?<div className="copy-toast" role="status">{toast}</div>:null}</div>;
+  /* Pane geometry keeps tracking a browser resize, but xterm waits for the
+     short resize burst to settle so ttyd/tmux receive only the final grid. */
+  useLayoutEffect(()=>{if(active&&!suspended&&!fitDeferred)try{client.current?.fit.fit()}catch{}},[active,suspended,fitDeferred,layoutSize]);
+  return <div className={'term xterm-term pattern-'+(folder.pattern||'plain')+(useTmux?' tmux-terminal':'')+' connection-'+state+(suspended?' xterm-suspended':'')}
+              aria-label={suspended?'Terminal paused during layout change':'Terminal '+state} aria-busy={suspended||undefined}><div className="xterm-host" ref={host}/>{state==='ready'?null:<div className="connection-state">{state}</div>}{toast?<div className="copy-toast" role="status">{toast}</div>:null}</div>;
 }
 
 const DocThemeContext = React.createContext<((folderId: string, theme: string) => void) | null>(null);
@@ -493,12 +503,16 @@ function DocBlockView({ block, folder }: { block: DocBlock; folder: Folder }) {
   }
 }
 
-function DocTerminal({ folder, page, section }: { folder: Folder; page: DocPage; section: DocSection }) {
+function DocTerminal({ folder, page, section, suspended }: { folder: Folder; page: DocPage; section: DocSection; suspended: boolean }) {
   const first = page.sections[0] === section;
+  const [entering,setEntering]=useState(()=>!REDUCED());
+  useEffect(()=>{if(!entering)return;const timer=setTimeout(()=>setEntering(false),240);return()=>clearTimeout(timer)},[entering]);
   return (
-    <div className={'term doc-term pattern-' + (folder.pattern || 'plain')} data-ready="1" data-doc={page.id}
-         role="region" aria-label={page.title + ' documentation'} tabIndex={0}>
-      <div className="term-body">
+    <div className={'term doc-term pattern-' + (folder.pattern || 'plain') + (suspended ? ' resize-placeholder' : '')}
+         data-ready="1" data-doc={page.id} role="region"
+         aria-label={suspended ? 'Terminal paused during layout change' : page.title + ' documentation'}
+         aria-busy={suspended || undefined} tabIndex={suspended ? -1 : 0}>
+      <div className={'term-body'+(entering?' term-entering':'')} aria-hidden={suspended || undefined}>
         <span className="term-row">
           <span style={{ color: colorOf('green') }}>visitor@ttydterm</span>
           <span style={{ color: colorOf('dim') }}>:</span>
@@ -528,21 +542,17 @@ function MockTerminal({ folder, pane, suspended }: {
   suspended: boolean;
 }) {
   const rows = useMemo(() => mockTerminal({ folder, pane }), [folder.cwd, folder.doc, pane.id, pane.command]);
-  const [ready, setReady] = useState(() => REDUCED());
-  useEffect(() => {
-    if (ready) return;
-    const t = setTimeout(() => setReady(true), 240);
-    return () => clearTimeout(t);
-  }, [ready]);
+  const [phase,setPhase]=useState<'skeleton'|'entering'|'ready'>(()=>REDUCED()?'ready':'skeleton');
+  useEffect(()=>{
+    if(phase==='ready')return;
+    const timer=setTimeout(()=>setPhase(phase==='skeleton'?'entering':'ready'),phase==='skeleton'?240:220);
+    return()=>clearTimeout(timer);
+  },[phase]);
 
-  if (suspended) return (
-    <div className={"term resize-placeholder pattern-" + (folder.pattern || "plain")}
-         aria-label="Terminal paused while resizing" />
-  );
-
-  if (!ready) {
+  if (phase==='skeleton') {
     return (
-      <div className="term skeleton" data-ready="0" aria-hidden="true">
+      <div className={'term skeleton pattern-' + (folder.pattern || 'plain') + (suspended ? ' resize-placeholder' : '')}
+           data-ready="0" aria-hidden="true">
         <div className="sk-line" style={{ width: '46%' }} />
         <div className="sk-grid">
           {[72, 54, 63, 48, 58, 66, 51, 60].map((w, i) => (
@@ -556,8 +566,10 @@ function MockTerminal({ folder, pane, suspended }: {
   }
 
   return (
-    <div className={"term pattern-" + (folder.pattern || "plain")} data-ready="1">
-      <div className="term-body">
+    <div className={'term pattern-' + (folder.pattern || 'plain') + (suspended ? ' resize-placeholder' : '')}
+         data-ready="1" aria-label={suspended ? 'Terminal paused while resizing' : undefined}
+         aria-busy={suspended || undefined}>
+      <div className={'term-body'+(phase==='entering'?' term-entering':'')} aria-hidden={suspended || undefined}>
         {rows.map((row, i) =>
           row.kind === 'ls' ? (
             <div className="ls" key={i} style={{
@@ -585,12 +597,14 @@ function MockTerminal({ folder, pane, suspended }: {
   );
 }
 
-function Terminal({ folder, pane, runtime, active, suspended, titleOwner, useTmux, onCommandComplete, onOutputActivity }: {
+function Terminal({ folder, pane, runtime, active, suspended, fitDeferred, layoutSize, titleOwner, useTmux, onCommandComplete, onOutputActivity }: {
   folder: Folder;
   pane: PaneNode;
   runtime: Runtime;
   active: boolean;
   suspended: boolean;
+  fitDeferred: boolean;
+  layoutSize: string;
   titleOwner: boolean;
   useTmux: boolean|null;
   onCommandComplete: (event:CommandCompletion) => void;
@@ -599,11 +613,9 @@ function Terminal({ folder, pane, runtime, active, suspended, titleOwner, useTmu
   const page = folder.doc ? docPage(folder.doc) : null;
   const section = page ? page.sections[pane.docSection ?? 0] : null;
 
-  if(page&&section)return suspended
-    ? <div className={'term resize-placeholder pattern-'+(folder.pattern||'plain')} aria-label="Terminal paused during layout change"/>
-    : <DocTerminal folder={folder} page={page} section={section}/>;
+  if(page&&section)return <DocTerminal folder={folder} page={page} section={section} suspended={suspended}/>;
   if (!folder.doc&&runtime.mode==='ttyd'&&useTmux===null)return <div className={'term pattern-'+(folder.pattern||'plain')} aria-label="Terminal waiting for tmux check"><div className="connection-state">Checking for tmux…</div></div>;
-  if (!folder.doc && runtime.mode === 'ttyd'&&useTmux!==null) return <RealTerminal folder={folder} pane={pane} runtime={runtime} active={active} suspended={suspended} titleOwner={titleOwner} useTmux={useTmux} onCommandComplete={onCommandComplete} onOutputActivity={onOutputActivity}/>;
+  if (!folder.doc && runtime.mode === 'ttyd'&&useTmux!==null) return <RealTerminal folder={folder} pane={pane} runtime={runtime} active={active} suspended={suspended} fitDeferred={fitDeferred} layoutSize={layoutSize} titleOwner={titleOwner} useTmux={useTmux} onCommandComplete={onCommandComplete} onOutputActivity={onOutputActivity}/>;
   return <MockTerminal folder={folder} pane={pane} suspended={suspended}/>;
 }
 
@@ -632,7 +644,7 @@ const tmuxState = (capabilities:Capabilities, runtime:Runtime):TmuxState => capa
 type PaneMenu = { source: 'trigger' | 'context'; x: number; y: number };
 interface FocusRequest { id: string; n?: number; nonce?: number }
 
-const Pane=React.memo(function Pane({ node, folder, runtime, active, focused, completed, closing, focusReq, resizing, useTmux,
+const Pane=React.memo(function Pane({ node, folder, runtime, active, focused, completed, closing, focusReq, resizing, fitDeferred, useTmux,
                frame, exchangeRole, canExchange, position, paneCount,
                onFocus, onSplit, onClose, canClose, onOpenSettings, onOpenWorkspaceSettings, onCommandComplete, onOutputActivity,
                onExchangePointer, onExchangeKey }: {
@@ -645,6 +657,7 @@ const Pane=React.memo(function Pane({ node, folder, runtime, active, focused, co
   closing: boolean;
   focusReq: FocusRequest | null;
   resizing: boolean;
+  fitDeferred: boolean;
   useTmux: boolean|null;
   frame: Frame;
   exchangeRole: 'source' | 'target' | null;
@@ -664,9 +677,11 @@ const Pane=React.memo(function Pane({ node, folder, runtime, active, focused, co
 }) {
   const [menu, setMenu] = useState<PaneMenu | null>(null);
   const [gripVisible,setGripVisible]=useState(false);
+  const [entering,setEntering]=useState(()=>!REDUCED());
   const ref = useRef<HTMLDivElement | null>(null),menuRef=useRef<HTMLDivElement|null>(null);
   const accent = themeOf(folder.theme);
 
+  useEffect(()=>{if(!entering)return;const timer=setTimeout(()=>setEntering(false),180);return()=>clearTimeout(timer)},[entering]);
   useEffect(() => {
     if (!menu) return;
     const off = () => setMenu(null);
@@ -701,12 +716,19 @@ const Pane=React.memo(function Pane({ node, folder, runtime, active, focused, co
     else ref.current?.focus({preventScroll:true});
   };
   const focusPane=()=>onFocus(folder.id,node.id);
+  const paneControl=(target:EventTarget)=>target instanceof Element&&!!target.closest('.pane-grip,.rail-pane,.panepop');
+  const activateFromPointer=(target:EventTarget)=>{
+    focusPane();
+    if(paneControl(target))return;
+    focusTerminal();
+    requestAnimationFrame(()=>{if(!menuRef.current)focusTerminal()});
+  };
   const split=(axis:SplitAxis,count:number)=>{setMenu(null);onSplit(folder.id,node.id,axis,count)};
 
   return (
     <div
       ref={ref}
-      className={'pane' + (focused ? ' focused' : '') + (closing ? ' closing' : '')
+      className={'pane' + (focused ? ' focused' : '') + (closing ? ' closing' : '') + (entering ? ' entering' : '')
         + (exchangeRole ? ' exchange-' + exchangeRole : '')}
       style={{ ...themeVars(accent), '--t-ring': accent.blue,
         left: frame.x + 'px', top: frame.y + 'px', width: frame.w + 'px', height: frame.h + 'px' }}
@@ -714,7 +736,7 @@ const Pane=React.memo(function Pane({ node, folder, runtime, active, focused, co
       aria-label={'Terminal' + (completed ? ', ' + completed + ' completed command' + (completed === 1 ? '' : 's') + ' needing attention' : '')}
       tabIndex={-1}
       onPointerDownCapture={(event:React.PointerEvent<HTMLDivElement>)=>{
-        focusPane();
+        activateFromPointer(event.target);
         if(useTmux&&event.button===1){
           event.stopPropagation();
           ref.current?.querySelector('.xterm-host')?.dispatchEvent(new Event('ttydterm-primary-selection'));
@@ -733,13 +755,14 @@ const Pane=React.memo(function Pane({ node, folder, runtime, active, focused, co
       onFocus={focusPane}
 
       onContextMenu={(e) => {
-        e.preventDefault(); focusPane();
+        e.preventDefault();
+        if(paneControl(e.target))focusPane();else activateFromPointer(e.target);
         const r = ref.current?.getBoundingClientRect();
         if (!r) return;
         setMenu({ source:'context', x:e.clientX-r.left, y:e.clientY-r.top });
       }}
     >
-      <Terminal folder={folder} pane={node} runtime={runtime} active={active} suspended={resizing} titleOwner={active&&focused} useTmux={useTmux} onCommandComplete={onCommandComplete} onOutputActivity={onOutputActivity} />
+      <Terminal folder={folder} pane={node} runtime={runtime} active={active} suspended={resizing} fitDeferred={fitDeferred} layoutSize={frame.w+'x'+frame.h} titleOwner={active&&focused} useTmux={useTmux} onCommandComplete={onCommandComplete} onOutputActivity={onOutputActivity} />
       {completed ? <span className="pane-complete" aria-hidden="true" /> : null}
 
       {}
@@ -837,7 +860,7 @@ function clampSplit(split: SplitNode, index: number, delta: number, avail: numbe
 
 type ExchangeState = { source: string; target: string | null; mode: 'pointer' | 'keyboard' };
 
-function Surface({ folder, runtime, active, focusId, closingId, focusReq, completedByPane, appResizing, useTmux, fontSize,
+function Surface({ folder, runtime, active, focusId, closingId, focusReq, completedByPane, appResizing, browserResizing, useTmux, fontSize, layoutVersion,
                    onFocus, onSplit, onClose, onResize, onAddFirst, onOpenSettings, onOpenWorkspaceSettings, onCommandComplete, onOutputActivity,
                    onExchange }: {
   folder: Folder;
@@ -848,8 +871,10 @@ function Surface({ folder, runtime, active, focusId, closingId, focusReq, comple
   focusReq: FocusRequest | null;
   completedByPane: Record<string,number>;
   appResizing: boolean;
+  browserResizing: boolean;
   useTmux: boolean|null;
   fontSize: number;
+  layoutVersion: string;
   onFocus: (folderId:string,paneId:string) => void;
   onSplit: (folderId:string,paneId:string,axis:SplitAxis,count:number) => void;
   onClose: (paneId: string) => void;
@@ -869,16 +894,19 @@ function Surface({ folder, runtime, active, focusId, closingId, focusReq, comple
   const announce=(message:string)=>{setAnnouncement('');requestAnimationFrame(()=>setAnnouncement(message))};
   useEffect(()=>{if(!active)setAnnouncement('')},[active]);
 
-  useLayoutEffect(() => {
-    const el = viewport.current;
-    if (!el) return;
-    const ro = new ResizeObserver(([entry]) => {
-      const r = entry.contentRect;
-      setBox({ w: r.width, h: r.height });
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
+  const measureViewport=useCallback(()=>{
+    const el=viewport.current;if(!el)return;
+    const r=el.getBoundingClientRect(),w=r.width,h=r.height;
+    setBox((current)=>current.w===w&&current.h===h?current:{w,h});
+  },[]);
+  /* App commits viewport and responsive-rail state together. Measure from that
+     DOM in a layout effect, then commit pane frames before the browser paints. */
+  useLayoutEffect(measureViewport,[layoutVersion,measureViewport]);
+  useLayoutEffect(()=>{
+    const el=viewport.current;if(!el)return;
+    const ro=new ResizeObserver(measureViewport);ro.observe(el);
+    return()=>ro.disconnect();
+  },[measureViewport]);
 
   const min = useMemo(() => nodeMin(folder.layout,GAP), [folder.layout]);
   const canClose = useMemo(()=>countPanes(folder.layout)>1,[folder.layout]);
@@ -1058,7 +1086,7 @@ function Surface({ folder, runtime, active, focusId, closingId, focusReq, comple
                     focused={focusId === item.pane.id} completed={completedByPane[item.pane.id] || 0}
                     closing={closingId === item.pane.id}
                     focusReq={focusReq?.id === item.pane.id ? focusReq : null}
-                    resizing={resizing || appResizing || !!exchange} useTmux={useTmux}
+                    resizing={resizing || appResizing || !!exchange} fitDeferred={browserResizing} useTmux={useTmux}
                     frame={{ x: item.x, y: item.y, w: item.w, h: item.h }}
                     exchangeRole={exchange ? (exchange.source === item.pane.id ? 'source' : exchange.target === item.pane.id ? 'target' : null) : null}
                     canExchange={canExchange}
@@ -1158,7 +1186,9 @@ function FolderDialog({ folder, isNew, globalFontSize, onChange, onCreate, onDel
   canDelete?: boolean;
 }) {
   const [draft, setDraft] = useState<Folder>(folder);
-  useEffect(() => setDraft(folder), [folder]);
+  /* Local edits own this draft. A different workspace resets it; a new object
+     for the same workspace must not erase typing during unrelated rerenders. */
+  useEffect(() => setDraft(folder), [folder.id]);
   const put = (patch: Partial<Folder>) => { setDraft((d) => ({ ...d, ...patch })); if (!isNew) onChange?.(patch); };
   const nameId = useId(), cwdId = useId();
   const label = draft.name.trim() || draft.cwd.split('/').filter((s) => s && s !== '~').pop() || 'workspace';
@@ -1599,7 +1629,11 @@ function App() {
 
   const ui = config.ui;
   const effectiveTmux=ui.useTmux?(tmux.state==='present'?true:tmux.state==='absent'?false:knownTmux.current):false;
-  const [narrowViewport,setNarrowViewport]=useState(()=>matchMedia('(max-width: 720px)').matches);
+  const [viewportSize,setViewportSize]=useState(()=>({w:innerWidth,h:innerHeight,narrow:matchMedia('(max-width: 720px)').matches}));
+  const viewportSizeRef=useRef(viewportSize);viewportSizeRef.current=viewportSize;
+  const [browserResizing,setBrowserResizing]=useState(false);
+  const browserResizeTimer=useRef<ReturnType<typeof setTimeout>|null>(null);
+  const narrowViewport=viewportSize.narrow;
   const [narrowRailOpen,setNarrowRailOpen]=useState(false);
   const railOpen = narrowViewport ? narrowRailOpen : ui.railOpen;
   const setUi = useCallback((patch: Partial<UiState>) => setConfig((c) => ({ ...c, ui: { ...c.ui, ...patch } })), []);
@@ -1733,11 +1767,19 @@ function App() {
   }, [setRailOpen,folders,active,focusId,focusFolderPane]);
 
 
-  useEffect(() => {
-    const mq=matchMedia('(max-width: 720px)');
-    const apply=(event:MediaQueryListEvent)=>{setNarrowViewport(event.matches);setNarrowRailOpen(false)};
-    mq.addEventListener('change',apply);
-    return()=>mq.removeEventListener('change',apply);
+  useEffect(()=>{
+    const apply=()=>{
+      const next={w:innerWidth,h:innerHeight,narrow:matchMedia('(max-width: 720px)').matches},previous=viewportSizeRef.current;
+      if(previous.w!==next.w||previous.h!==next.h||previous.narrow!==next.narrow){
+        viewportSizeRef.current=next;setViewportSize(next);
+        if(previous.narrow!==next.narrow)setNarrowRailOpen(false);
+      }
+      setBrowserResizing(true);
+      if(browserResizeTimer.current)clearTimeout(browserResizeTimer.current);
+      browserResizeTimer.current=setTimeout(()=>{browserResizeTimer.current=null;setBrowserResizing(false)},BROWSER_RESIZE_SETTLE_MS);
+    };
+    addEventListener('resize',apply);
+    return()=>{removeEventListener('resize',apply);if(browserResizeTimer.current)clearTimeout(browserResizeTimer.current)};
   },[]);
 
   const patchFolder = useCallback((id: string, fn: (folder:Folder)=>Folder) => {
@@ -1844,9 +1886,9 @@ function App() {
   const showShortcuts=route[0]==='shortcuts';
   const closeDialog = () => go('f', active.id);
 
-  const [newDraft, setNewDraft] = useState<Omit<Folder,'layout'> | null>(null);
+  const [newDraft, setNewDraft] = useState<Folder | null>(null);
   useEffect(() => {
-    if (showNewDlg && !newDraft) setNewDraft({ id: uid('f-'), name: '', cwd: '~/', icon: null, pattern:'dots', theme:active?.theme||'paper' });
+    if (showNewDlg && !newDraft) setNewDraft({ id: uid('f-'), name: '', cwd: '~/', icon: null, pattern:'dots', theme:active?.theme||'paper', layout:null });
     if (!showNewDlg && newDraft) setNewDraft(null);
   }, [showNewDlg, newDraft]);
 
@@ -2024,8 +2066,9 @@ function App() {
       <main className="stage">
         {runtime.mode !== 'ttyd' && runtime.mode !== 'mock' ? <SetupNotice mode={runtime.mode} onRetry={()=>{setRuntime({mode:'probing'});detectRuntime().then(setRuntime)}} /> : null}
         {mountedFolders.map((f) => (
-          <Surface key={f.id} folder={f} runtime={runtime} active={f.id===active.id} focusId={focusId} appResizing={appResizing}
+          <Surface key={f.id} folder={f} runtime={runtime} active={f.id===active.id} focusId={focusId} appResizing={appResizing} browserResizing={browserResizing}
                    closingId={closingId} focusReq={focusReq} completedByPane={completedByPane} useTmux={effectiveTmux} fontSize={workspaceFontSize(f.fontSize,ui.fontSize)}
+                   layoutVersion={viewportSize.w+'x'+viewportSize.h+':'+String(railOpen)+':'+ui.railWidth}
                    onFocus={onPaneFocus} onSplit={onSplit} onClose={onClose} onResize={onResize}
                    onAddFirst={addFirstPane} onOpenSettings={openPaneSettings} onOpenWorkspaceSettings={openWorkspaceSettings} onCommandComplete={onCommandComplete} onOutputActivity={onOutputActivity}
                    onExchange={onPaneExchange} />
@@ -2075,7 +2118,7 @@ function App() {
 
       <ModalShell open={showNewDlg && !!newDraft} onClose={() => go('f', active.id)}>
         {newDraft ? (
-          <FolderDialog folder={{...newDraft,layout:null}} isNew globalFontSize={ui.fontSize} onClose={() => go('f', active.id)}
+          <FolderDialog folder={newDraft} isNew globalFontSize={ui.fontSize} onClose={() => go('f', active.id)}
             onCreate={(next) => {
               const folder: Folder = { ...next, theme: next.theme || active.theme || 'paper', layout: pane('bash', ui.useTmux) };
               setConfig((c) => ({ ...c, folders: c.folders.concat(folder) }));

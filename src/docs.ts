@@ -53,7 +53,7 @@ const readmeMain: DocSection = {
   fileName: 'readme.md',
   blocks: [
     { kind: 'lead', spans: [em(README_LEAD)] },
-    { kind: 'para', spans: [t('ttydterm adds workspaces, split panes, themes, tmux continuity, and command completion alerts to vanilla ttyd.')] },
+    { kind: 'para', spans: [t('ttydterm adds reorderable workspaces, live pane exchange, per-workspace appearance, tmux continuity, and private completion alerts to vanilla ttyd.')] },
     { kind: 'para', spans: [t('One offline '), code('index.html'), t(' contains the full interface.')] },
     { kind: 'para', spans: [t('Open '), em('Using it'), t(' for installation and setup.')] },
     { kind: 'para', spans: [link(REPO), t(' (MIT licensed)')] },
@@ -69,12 +69,12 @@ const readmeFeatures: DocSection = {
   blocks: [
     { kind: 'heading', text: 'Features' },
     { kind: 'list', items: [
-      [em('Workspaces:'), t(' Keep projects and terminals separate, then drag their icons to set the order.')],
-      [em('Split panes:'), t(' Arrange rows and columns, then exchange running terminals between pane slots.')],
-      [em('Pane setup:'), t(' Choose each command and working directory.')],
-      [em('tmux continuity:'), t(' Keep processes running through disconnects.')],
-      [em('Completion alerts:'), t(' Mark finished commands and notify when away.')],
-      [em('Themes:'), t(' Choose colors, patterns, fonts, and weights.')],
+      [em('Workspaces:'), t(' Keep projects, working directories, and terminals separate; drag icons or use their menus to reorder.')],
+      [em('Split panes:'), t(' Arrange rows and columns, then exchange live terminals without reconnecting them.')],
+      [em('Pane setup:'), t(' Choose each pane’s command; workspace settings own its working directory and appearance.')],
+      [em('tmux continuity:'), t(' Apply one global policy and keep processes running through disconnects.')],
+      [em('Completion alerts:'), t(' Mark finished commands and optionally notify when away.')],
+      [em('Themes:'), t(' Choose per-workspace colors, patterns, and font size, with app-wide font defaults.')],
       [em('Keyboard control:'), t(' Navigate and search without the mouse.')],
       [em('Backup:'), t(' Export and restore your workspace configuration.')],
       [em('Offline:'), t(' Run the complete interface from one index.html.')],
@@ -88,15 +88,15 @@ const readmeKeyboard: DocSection = {
   blocks: [
     { kind: 'heading', text: 'Keyboard' },
     { kind: 'defs', items: [
-      { term:'Alt + 1…9', detail:'switch workspace' },
-      { term:'Alt + Arrow', detail:'move between panes' },
+      { term:'Alt + 1…9', detail:'switch workspace and restore its last pane' },
+      { term:'Alt + Arrow', detail:'move focus between panes' },
       { term:'Ctrl/⌘ + K or P', detail:'find a workspace or terminal' },
       { term:'Ctrl/⌘ + B', detail:'toggle the sidebar' },
       { term:'Ctrl/⌘ + ,', detail:'open global settings' },
       { term:'Ctrl/⌘ + Shift + ,', detail:'open workspace settings' },
-      { term:'Escape', detail:'close a menu or dialog' },
+      { term:'Escape', detail:'cancel exchange or close a menu/dialog' },
     ] },
-    { kind: 'para', spans: [t('Right-click a pane for splits, paste, settings, and close. Move to the top-left corner of a pane to reveal its exchange handle. Drag the handle onto another pane, or focus it and use Enter, the arrow keys, and Enter again.')] },
+    { kind: 'para', spans: [t('Right-click a pane for Paste, settings, splits, and close. Middle-click keeps native PRIMARY-selection paste where supported. Reveal the top-left exchange handle; drag it onto another pane, or press Enter, an arrow key, then Enter.')] },
   ],
 };
 
@@ -116,7 +116,7 @@ const usingIt: DocSection = {
     { kind: 'command', command: ttydLaunchCommand() },
     { kind: 'para', spans: [t('Open '), link(TTYD_URL), t('. The browser asks for the username and password before it opens the terminal.')] },
     { kind: 'heading', text: 'Keep a process alive with tmux' },
-    { kind: 'para', spans: [t('Turn on '), em('Use tmux when available'), t(' in global settings. ttydterm starts every command in a tmux session. When the browser or ttyd disconnects, the process keeps running. The pane reconnects to the same session later.')] },
+    { kind: 'para', spans: [t('Turn on '), em('Use tmux when available'), t(' in global settings. It applies to every pane; changing it restarts every terminal. With tmux on, processes survive browser or ttyd disconnects and panes reconnect to the same sessions.')] },
     { kind: 'para', spans: [t('ttydterm checks for tmux in the PATH used by ttyd’s login shell. If it is installed but not found, run '), em('command -v tmux'), t(' in a pane and update that shell’s login PATH.')] },
     { kind: 'para', spans: [t('The process lasts while the tmux server and session run. A host reboot or a stopped tmux session ends it.')] },
   ],
@@ -125,10 +125,10 @@ const usingIt: DocSection = {
 const themes: DocSection = {
   fileName: 'themes.md',
   blocks: [
-    { kind: 'lead', spans: [em('Each workspace keeps its own theme.')] },
+    { kind: 'lead', spans: [em('Each workspace keeps its own theme, pattern, and optional terminal font size.')] },
     { kind: 'para', spans: [t('Choose a theme below. The app repaints this workspace at once. Other workspaces keep their current themes.')] },
     { kind: 'themes' },
-    { kind: 'para', spans: [t('Open another page and return here to check the saved choice. A real ttyd session puts this control in each workspace settings dialog. Open global settings with '), code('Ctrl/⌘ + ,'), t(' for app-wide font, tmux, and notification choices.')] },
+    { kind: 'para', spans: [t('Open another page and return here to check the saved choice. In a real ttyd session, workspace settings control theme, pattern, and an optional font-size override. Global settings control app-wide font size and weight, tmux, and notifications; open them with '), code('Ctrl/⌘ + ,'), t('.')] },
     { kind: 'para', spans: [t('Every built-in theme passes the text and focus contrast checks in the test suite.')] },
     { kind: 'para', spans: [t('This demo keeps changes in memory. It does not replace a saved terminal workspace.')] },
   ],

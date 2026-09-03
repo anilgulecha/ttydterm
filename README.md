@@ -8,12 +8,12 @@ A terminal in your browser, with unix tools (ttyd, tmux) that you love and trust
 
 ## Features
 
-- **Workspaces:** Keep projects and terminals separate, then drag their icons to set the order.
-- **Split panes:** Arrange rows and columns, then reveal the top-left overlay to exchange running terminals between pane slots.
-- **Pane setup:** Choose each command and working directory.
-- **tmux continuity:** Keep processes running through disconnects.
-- **Completion alerts:** Mark finished commands and notify when away.
-- **Themes:** Choose colors, patterns, fonts, and weights.
+- **Workspaces:** Keep projects, working directories, and terminals separate; drag icons or use their menus to reorder.
+- **Split panes:** Arrange rows and columns, then exchange live terminals without reconnecting them.
+- **Pane setup:** Choose each pane’s command; workspace settings own its working directory and appearance.
+- **tmux continuity:** Apply one global policy and keep processes running through disconnects.
+- **Completion alerts:** Mark finished commands and optionally notify when away.
+- **Themes:** Choose per-workspace colors, patterns, and font size, with app-wide font defaults.
 - **Keyboard control:** Navigate and search without the mouse.
 - **Backup:** Export and restore your workspace configuration.
 - **Offline:** Run the complete interface from one `index.html`.

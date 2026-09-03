@@ -106,10 +106,10 @@ ok('social previews use the published product screenshot', await page.evaluate((
     content('meta[name="twitter:image"]')==='https://www.gulecha.org/ttydterm/docs/ttydterm.png';
 }));
 ok('hash route settled on a folder', /#\/f\//.test(page.url()), page.url());
-ok('release 1.7.0 is a compact superscript beside the wordmark and exposed on the shell',await page.evaluate(()=>
-  document.querySelector('.brand-version')?.textContent==='1.7.0'&&
-  document.querySelector('.brand-version')?.getAttribute('aria-label')==='version 1.7.0'&&
-  document.querySelector('.shell')?.getAttribute('data-version')==='1.7.0'));
+ok('release 1.8.0 is a compact superscript beside the wordmark and exposed on the shell',await page.evaluate(()=>
+  document.querySelector('.brand-version')?.textContent==='1.8.0'&&
+  document.querySelector('.brand-version')?.getAttribute('aria-label')==='version 1.8.0'&&
+  document.querySelector('.shell')?.getAttribute('data-version')==='1.8.0'));
 const faviconBoot=await page.evaluate(()=>{
   const links=[...document.querySelectorAll('link[rel~="icon"]')],link=links[0],href=link?.getAttribute('href')||'';
   return {count:links.length,state:link?.dataset.state,href,svg:href.startsWith('data:image/svg+xml,')?decodeURIComponent(href.slice(href.indexOf(',')+1)):''};
@@ -173,7 +173,7 @@ ok('the collapse control shares the workspace icon column', await page.evaluate(
 ok('the release uses a light superscript pill immediately after ttydterm',await page.evaluate(()=>{
   const name=document.querySelector('.brand-name'),badge=document.querySelector('.brand-version');if(!badge||!name)return false;
   const b=badge.getBoundingClientRect(),n=name.getBoundingClientRect(),style=getComputedStyle(badge);
-  return badge.textContent==='1.7.0'&&b.left>=n.right&&b.top<n.top+n.height/2&&b.height<n.height&&parseFloat(style.borderRadius)>=6&&style.boxShadow!=='none';
+  return badge.textContent==='1.8.0'&&b.left>=n.right&&b.top<n.top+n.height/2&&b.height<n.height&&parseFloat(style.borderRadius)>=6&&style.boxShadow!=='none';
 }));
 ok('workspace icons have no decorative line markers',await page.evaluate(()=>
   [...document.querySelectorAll('.folder-badge')].every((badge)=>getComputedStyle(badge,'::after').content==='none')));
@@ -1927,6 +1927,108 @@ await retryPage.waitForFunction(()=>document.querySelector('.global-settings')?.
 ok('retrying the tmux check preserves every running terminal socket',await retryPage.evaluate((count)=>
   window.__retrySockets.length===count+1&&!window.__retryTerminalSocket.closed&&document.querySelector('.xterm-term')?.dataset.retryIdentity==='kept',retrySocketCount));
 await retryContext.close();
+
+const reconnectContext=await browser.newContext({viewport:{width:1200,height:760}});
+await reconnectContext.addInitScript((config)=>{
+  localStorage.setItem('ttyd-workspace-v2',JSON.stringify(config));window.__reconnectSockets=[];
+  const frame=(command,text)=>{const data=new TextEncoder().encode(text),out=new Uint8Array(data.length+1);out[0]=command.charCodeAt(0);out.set(data,1);return out.buffer};
+  /* A real dropped socket reports through an asynchronous close event,
+     including the close() the component issues while tearing an attempt down. */
+  class FakeWebSocket{
+    constructor(){this.readyState=0;this.sent=[];this.closed=false;window.__reconnectSockets.push(this);queueMicrotask(()=>{this.readyState=1;this.onopen?.({})})}
+    send(value){
+      const text=new TextDecoder().decode(value);this.sent.push(text);
+      if(text.startsWith('{'))queueMicrotask(()=>this.onmessage?.({data:frame('0','shell ready\r\n')}));
+      const marker=text.match(/__TTYDTERM_PROBE_[a-z0-9]+__/i)?.[0];
+      if(marker)queueMicrotask(()=>this.onmessage?.({data:frame('0','\0'+marker+'\0/home/test\0/work\0/bin/bash\0'+'0\0'+marker+'\0')}));
+    }
+    close(){if(this.closed)return;this.closed=true;this.readyState=3;setTimeout(()=>this.onclose?.({}),0)}
+    drop(){if(this.closed)return;this.closed=true;this.readyState=3;queueMicrotask(()=>this.onclose?.({}))}
+  }
+  Object.defineProperty(window,'WebSocket',{value:FakeWebSocket,configurable:true});
+},{version:8,ui:{railWidth:176,railOpen:true,fontSize:13,fontWeight:'regular',notifyOnCommandFinish:false,useTmux:true},folders:[
+  {id:'reconnect-workspace',name:'reconnect',cwd:'~',theme:'paper',icon:null,pattern:'plain',layout:{type:'split',axis:'columns',sizes:[.5,.5],children:[
+    {type:'pane',id:'drop-pane',command:'bash',persist:true},{type:'pane',id:'keep-pane',command:'bash',persist:true},
+  ]}},
+]});
+const reconnectPage=await reconnectContext.newPage();
+await reconnectPage.route('**/token',(route)=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({token:'test-token'})}));
+await reconnectPage.goto(RAW_BASE,{waitUntil:'domcontentloaded'});
+await reconnectPage.waitForFunction(()=>document.querySelectorAll('.connection-ready').length===2);
+const socketsFor=(id)=>reconnectPage.evaluate((paneId)=>window.__reconnectSockets.filter((socket)=>socket.sent.some((text)=>text.includes(paneId))).length,id);
+const droppedBefore=await socketsFor('drop-pane'),keptBefore=await socketsFor('keep-pane');
+const reconnectConfigBefore=await reconnectPage.evaluate(()=>localStorage.getItem('ttyd-workspace-v2'));
+await reconnectPage.locator('[data-pane-id="keep-pane"]').click({position:{x:80,y:80}});
+await reconnectPage.waitForFunction(()=>document.querySelector('[data-pane-id="keep-pane"]')?.classList.contains('focused')&&document.activeElement?.closest('.pane')?.dataset.paneId==='keep-pane');
+await reconnectPage.evaluate(()=>{
+  document.querySelector('[data-pane-id="drop-pane"] .xterm-host').dataset.reconnectIdentity='kept';
+  window.__keepSocket=window.__reconnectSockets.filter((socket)=>socket.sent.some((text)=>text.includes('keep-pane'))).at(-1);
+  window.__reconnectSockets.filter((socket)=>socket.sent.some((text)=>text.includes('drop-pane'))).at(-1).drop();
+});
+await reconnectPage.waitForSelector('[data-pane-id="drop-pane"] .connection-retry');
+ok('a dropped pane reports Disconnected with a Reconnect button directly below it',await reconnectPage.evaluate(()=>{
+  const pane=document.querySelector('[data-pane-id="drop-pane"]'),label=pane.querySelector('.connection-label'),button=pane.querySelector('.connection-retry');
+  if(!label||!button)return false;
+  const l=label.getBoundingClientRect(),b=button.getBoundingClientRect();
+  return label.textContent==='Disconnected'&&button.textContent==='Reconnect'&&button.tagName==='BUTTON'&&
+    b.top>=l.bottom-.5&&Math.abs((l.left+l.right)/2-(b.left+b.right)/2)<=1&&b.height>=24&&b.width>=24&&
+    !document.querySelector('[data-pane-id="keep-pane"] .connection-state');
+}));
+ok('the reconnect control is keyboard reachable with contrasting edges, text, and focus ring',await reconnectPage.evaluate(()=>{
+  const button=document.querySelector('[data-pane-id="drop-pane"] .connection-retry');
+  button.focus({focusVisible:true});
+  const style=getComputedStyle(button),rgb=(value)=>value.match(/[\d.]+/g).slice(0,3).map(Number);
+  const luminance=(value)=>{const [r,g,b]=rgb(value).map((part)=>{const channel=part/255;return channel<=.03928?channel/12.92:Math.pow((channel+.055)/1.055,2.4)});return .2126*r+.7152*g+.0722*b};
+  const contrast=(a,b)=>{const high=Math.max(luminance(a),luminance(b)),low=Math.min(luminance(a),luminance(b));return (high+.05)/(low+.05)};
+  return document.activeElement===button&&button.tabIndex>=0&&parseFloat(style.outlineWidth)>=2&&style.outlineStyle!=='none'&&
+    contrast(style.color,style.backgroundColor)>=4.5&&contrast(style.borderColor,style.backgroundColor)>=3&&contrast(style.outlineColor,style.backgroundColor)>=3;
+}));
+await reconnectPage.waitForFunction(()=>document.querySelector('[data-pane-id="drop-pane"]')?.classList.contains('focused'));
+ok('keyboard focus on an inactive pane reconnect control transfers pane ownership',await reconnectPage.evaluate(()=>
+  document.activeElement?.classList.contains('connection-retry')&&document.activeElement?.closest('.pane')?.dataset.paneId==='drop-pane'&&
+  !document.querySelector('[data-pane-id="keep-pane"]')?.classList.contains('focused')));
+const reconnectSocketsBefore=await reconnectPage.evaluate(()=>window.__reconnectSockets.length);
+await reconnectPage.locator('[data-pane-id="drop-pane"] .connection-retry').press('Enter');
+await reconnectPage.waitForFunction(()=>!document.querySelector('[data-pane-id="drop-pane"] .connection-state'));
+const droppedAfter=await socketsFor('drop-pane'),keptAfter=await socketsFor('keep-pane');
+ok('keyboard reconnect opens exactly one replacement socket and leaves siblings connected',
+  droppedAfter===droppedBefore+1&&keptAfter===keptBefore&&await reconnectPage.evaluate((count)=>
+    window.__reconnectSockets.length===count+1&&!window.__keepSocket.closed&&window.__keepSocket.readyState===1&&
+    !document.querySelector('[data-pane-id="keep-pane"] .connection-state'),reconnectSocketsBefore),
+  JSON.stringify({droppedBefore,droppedAfter,keptBefore,keptAfter}));
+ok('a completed reconnect clears the overlay and keeps pane and saved configuration identity',await reconnectPage.evaluate((saved)=>{
+  const pane=document.querySelector('[data-pane-id="drop-pane"]');
+  return !!pane&&document.querySelectorAll('.surface:not([hidden]) .pane').length===2&&
+    pane.querySelector('.xterm-host')?.dataset.reconnectIdentity==='kept'&&
+    pane.querySelector('.term')?.classList.contains('connection-ready')&&
+    localStorage.getItem('ttyd-workspace-v2')===saved;
+},reconnectConfigBefore));
+ok('a reconnected pane returns real typing focus to its xterm input',await reconnectPage.evaluate(()=>
+  document.activeElement?.classList.contains('xterm-helper-textarea')&&
+  document.activeElement?.closest('.pane')?.dataset.paneId==='drop-pane'));
+ok('the reconnected pane runs on a live replacement socket',await reconnectPage.evaluate(()=>{
+  const dropped=window.__reconnectSockets.filter((socket)=>socket.sent.some((text)=>text.includes('drop-pane')));
+  return dropped.length>=2&&dropped.at(-1).readyState===1&&!dropped.at(-1).closed;
+}));
+/* Replacing a live terminal closes an open socket, so its close callback lands
+   after the replacement exists. A stale report must not mark the new attempt dead. */
+await reconnectPage.evaluate(()=>{
+  const term=document.querySelector('[data-pane-id="drop-pane"] .term');
+  window.__reconnectStates=[];
+  new MutationObserver(()=>window.__reconnectStates.push([...term.classList].find((name)=>name.startsWith('connection-'))))
+    .observe(term,{attributes:true,attributeFilter:['class']});
+  location.hash='#/f/reconnect-workspace/pane/drop-pane';
+});
+await reconnectPage.waitForSelector('.panesettings .ps-input');
+await reconnectPage.fill('.panesettings .ps-input','printf regression');
+await reconnectPage.locator('.panesettings .ps-input').press('Enter');
+await reconnectPage.waitForFunction(()=>document.querySelector('[data-pane-id="drop-pane"] .term')?.classList.contains('connection-ready'));
+await reconnectPage.waitForTimeout(20);
+ok('a stale close from the replaced terminal never reports the new connection as disconnected',await reconnectPage.evaluate(()=>
+  !window.__reconnectStates.includes('connection-disconnected')&&!window.__reconnectStates.includes('connection-error')&&
+  !document.querySelector('[data-pane-id="drop-pane"] .connection-state')),
+  await reconnectPage.evaluate(()=>window.__reconnectStates.join(', ')));
+await reconnectContext.close();
 
 const realLifecycleConfig={version:7,ui:{railWidth:176,railOpen:true,fontSize:13,fontWeight:'regular',notifyOnCommandFinish:false},folders:[
   {id:'title-one',name:'title-one',cwd:'~',theme:'night',icon:null,pattern:'plain',layout:{type:'pane',id:'p-one',command:'bash',persist:false}},

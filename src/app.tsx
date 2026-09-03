@@ -387,6 +387,11 @@ function RealTerminal({ folder, pane, runtime, active, suspended, fitDeferred, l
   const host = useRef<HTMLDivElement | null>(null), client = useRef<TerminalClient | null>(null);
   const [state,setState]=useState<ConnectionState>('connecting');
   const [toast,setToast]=useState<string|null>(null);
+  /* A manual reconnect is a new connection attempt, not a retry of the old one.
+     Bumping the attempt tears the previous terminal down through the normal
+     cleanup path, so one pane rebuilds without touching its siblings. */
+  const [attempt,setAttempt]=useState(0);
+  const focusOnReady=useRef(false);
   const appearanceContext=React.useContext(TerminalAppearanceContext);
   const appearanceVersion=folder.theme+'\0'+String(folder.fontSize||'global')+'\0'+appearanceContext;
   const appliedAppearance=useRef(''),titleOwnerRef=useRef(titleOwner),paneTitle=useRef(''),appliedTitle=useRef('');
@@ -394,6 +399,9 @@ function RealTerminal({ folder, pane, runtime, active, suspended, fitDeferred, l
   useLayoutEffect(() => {
     const hostEl = host.current;
     if (!hostEl || runtime.mode !== 'ttyd') return;
+    /* A closing socket reports asynchronously. Once this attempt is torn down,
+       its late close/error frames must not describe the attempt that replaced it. */
+    let cancelled=false;
     const appearance=xtermAppearance(hostEl);
     const term = new globalThis.Terminal({cursorBlink:false,allowTransparency:true,scrollback:useTmux?0:1000,fontSize:appearance.fontSize,fontWeight:appearance.fontWeight,fontFamily:'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace',convertEol:true,theme:appearance.theme});
     appliedAppearance.current=appearanceVersion;
@@ -411,16 +419,21 @@ function RealTerminal({ folder, pane, runtime, active, suspended, fitDeferred, l
     const encoder=new TextEncoder(),decoder=new TextDecoder();
     const socket=new WebSocket(runtime.endpoints.ws,['tty']);socket.binaryType='arraybuffer';let initialized=false,activityReadyAt=0,lastReportedSize='';
     const sendInput=(data: string)=>{if(socket.readyState!==1)return;const bytes=encoder.encode(data),payload=new Uint8Array(bytes.length+1);payload[0]=48;payload.set(bytes,1);socket.send(payload)};
-    socket.onopen=()=>{lastReportedSize=term.cols+'x'+term.rows;socket.send(encoder.encode(JSON.stringify({AuthToken:runtime.token,columns:term.cols,rows:term.rows})));setState('starting')};
-    socket.onmessage=(event: MessageEvent<ArrayBuffer>)=>{const bytes=new Uint8Array(event.data),command=String.fromCharCode(bytes[0]),data=bytes.slice(1);if(command==='0'){term.write(data);if(!initialized){initialized=true;activityReadyAt=Date.now()+ACTIVITY_GRACE_MS;const launch=paneLaunchCommand({cwd:folder.cwd,command:pane.command,persist:useTmux,folderLabel:folderLabel(folder),paneId:pane.id,shellIntegration:true});sendInput(`${launch}\r`);setState('ready')}else if(Date.now()>=activityReadyAt)onOutputActivity(folder.id,data.byteLength)}else if(command==='1'){paneTitle.current=decoder.decode(data)+' · ttydterm';if(titleOwnerRef.current){document.title=paneTitle.current;appliedTitle.current=paneTitle.current}}};
-    socket.onclose=()=>setState('disconnected');socket.onerror=()=>setState('error');
+    const publish=(next:ConnectionState)=>{if(!cancelled)setState(next)};
+    socket.onopen=()=>{if(cancelled)return;lastReportedSize=term.cols+'x'+term.rows;socket.send(encoder.encode(JSON.stringify({AuthToken:runtime.token,columns:term.cols,rows:term.rows})));publish('starting')};
+    socket.onmessage=(event: MessageEvent<ArrayBuffer>)=>{if(cancelled)return;const bytes=new Uint8Array(event.data),command=String.fromCharCode(bytes[0]),data=bytes.slice(1);if(command==='0'){term.write(data);if(!initialized){initialized=true;activityReadyAt=Date.now()+ACTIVITY_GRACE_MS;const launch=paneLaunchCommand({cwd:folder.cwd,command:pane.command,persist:useTmux,folderLabel:folderLabel(folder),paneId:pane.id,shellIntegration:true});sendInput(`${launch}\r`);publish('ready');
+      /* Focus returns through xterm's own API so a reconnect leaves the pane
+         typeable, exactly as it was before the connection dropped. */
+      if(focusOnReady.current){focusOnReady.current=false;if(titleOwnerRef.current)term.focus()}
+    }else if(Date.now()>=activityReadyAt)onOutputActivity(folder.id,data.byteLength)}else if(command==='1'){paneTitle.current=decoder.decode(data)+' · ttydterm';if(titleOwnerRef.current){document.title=paneTitle.current;appliedTitle.current=paneTitle.current}}};
+    socket.onclose=()=>publish('disconnected');socket.onerror=()=>publish('error');
     const input=term.onData(sendInput),resize=term.onResize(({cols,rows})=>{
       if(socket.readyState!==1)return;
       const next=cols+'x'+rows;if(next===lastReportedSize)return;lastReportedSize=next;
       socket.send(encoder.encode('1'+JSON.stringify({columns:cols,rows})));
     });
     let toastTimer:ReturnType<typeof setTimeout>,primaryTimer:ReturnType<typeof setTimeout>;
-    const showToast=(text:string)=>{setToast(text);clearTimeout(toastTimer);toastTimer=setTimeout(()=>setToast(null),2200)};
+    const showToast=(text:string)=>{if(cancelled)return;setToast(text);clearTimeout(toastTimer);toastTimer=setTimeout(()=>setToast(null),2200)};
     const pasteText=(text:string)=>pasteIntoTerminal(term,text);
     const readClipboard=async()=>{try{pasteText(await navigator.clipboard.readText())}catch{showToast('Clipboard access blocked');term.focus()}};
     const nativePaste=(event:ClipboardEvent)=>{clearTimeout(primaryTimer);const text=event.clipboardData?.getData('text/plain');if(text){event.preventDefault();pasteText(text)}};
@@ -431,8 +444,8 @@ function RealTerminal({ folder, pane, runtime, active, suspended, fitDeferred, l
     term.attachCustomKeyEventHandler((event:KeyboardEvent)=>{if((event.ctrlKey||event.metaKey)&&event.shiftKey&&event.key.toLowerCase()==='v'&&event.type==='keydown'){void readClipboard();return false}return true});
     const selection=term.onSelectionChange(async()=>{const text=term.getSelection();if(!text)return;try{await navigator.clipboard.writeText(text);showToast('Copied')}catch{}});
     client.current={term,fit,socket};
-    return()=>{clearTimeout(toastTimer);clearTimeout(primaryTimer);hostEl.removeEventListener('paste',nativePaste);hostEl.removeEventListener('ttydterm-paste',menuPaste);hostEl.removeEventListener('ttydterm-focus',focusTerminal);hostEl.removeEventListener('ttydterm-primary-selection',primarySelection);input.dispose();resize.dispose();selection.dispose();shellEvents.dispose();socket.close(1000);term.dispose();client.current=null};
-  },[folder.cwd,folder.id,pane.id,pane.command,useTmux,runtime.mode,runtime.mode==='ttyd'?runtime.token:null,onCommandComplete,onOutputActivity]);
+    return()=>{cancelled=true;clearTimeout(toastTimer);clearTimeout(primaryTimer);hostEl.removeEventListener('paste',nativePaste);hostEl.removeEventListener('ttydterm-paste',menuPaste);hostEl.removeEventListener('ttydterm-focus',focusTerminal);hostEl.removeEventListener('ttydterm-primary-selection',primarySelection);input.dispose();resize.dispose();selection.dispose();shellEvents.dispose();socket.close(1000);term.dispose();client.current=null};
+  },[folder.cwd,folder.id,pane.id,pane.command,useTmux,runtime.mode,runtime.mode==='ttyd'?runtime.token:null,attempt,onCommandComplete,onOutputActivity]);
 
   useLayoutEffect(()=>{
     if(!host.current||!client.current||appliedAppearance.current===appearanceVersion)return;
@@ -451,8 +464,14 @@ function RealTerminal({ folder, pane, runtime, active, suspended, fitDeferred, l
   /* Pane geometry keeps tracking a browser resize, but xterm waits for the
      short resize burst to settle so ttyd/tmux receive only the final grid. */
   useLayoutEffect(()=>{if(active&&!suspended&&!fitDeferred)try{client.current?.fit.fit()}catch{}},[active,suspended,fitDeferred,layoutSize]);
+  const reconnect=()=>{focusOnReady.current=true;setState('connecting');setAttempt((current)=>current+1)};
   return <div className={'term xterm-term pattern-'+(folder.pattern||'plain')+(useTmux?' tmux-terminal':'')+' connection-'+state+(suspended?' xterm-suspended':'')}
-              aria-label={suspended?'Terminal paused during layout change':'Terminal '+state} aria-busy={suspended||undefined}><div className="xterm-host" ref={host}/>{state==='ready'?null:<div className="connection-state">{state}</div>}{toast?<div className="copy-toast" role="status">{toast}</div>:null}</div>;
+              aria-label={suspended?'Terminal paused during layout change':'Terminal '+state} aria-busy={suspended||undefined}><div className="xterm-host" ref={host}/>{state==='ready'?null:(
+                state==='disconnected'
+                  ? <div className="connection-state"><span className="connection-label" role="status">Disconnected</span>
+                      <button type="button" className="connection-retry" onClick={reconnect}>Reconnect</button></div>
+                  : <div className="connection-state">{state}</div>
+              )}{toast?<div className="copy-toast" role="status">{toast}</div>:null}</div>;
 }
 
 const DocThemeContext = React.createContext<((folderId: string, theme: string) => void) | null>(null);
@@ -716,7 +735,7 @@ const Pane=React.memo(function Pane({ node, folder, runtime, active, focused, co
     else ref.current?.focus({preventScroll:true});
   };
   const focusPane=()=>onFocus(folder.id,node.id);
-  const paneControl=(target:EventTarget)=>target instanceof Element&&!!target.closest('.pane-grip,.rail-pane,.panepop');
+  const paneControl=(target:EventTarget)=>target instanceof Element&&!!target.closest('.pane-grip,.rail-pane,.panepop,.connection-retry');
   const activateFromPointer=(target:EventTarget)=>{
     focusPane();
     if(paneControl(target))return;

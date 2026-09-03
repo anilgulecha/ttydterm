@@ -246,3 +246,9 @@ These rules apply to terminal workspaces and other single-file browser tools.
 73. Window-manager maximize events can expose several valid viewport sizes. Keep visual
     geometry responsive, but wait for a short quiet period before fitting the emulator
     and PTY so intermediate grids do not make full-screen applications redraw twice.
+
+74. A dead connection needs an explicit recovery control next to the state that reports
+    it, and that control must rebuild only its own resource. Route the retry through the
+    normal teardown path, guard the old handlers so late close and error callbacks cannot
+    describe the attempt that replaced them, and return focus through the component's
+    public API once the replacement is ready.

@@ -2306,15 +2306,27 @@ ok('settled output in an unwatched workspace leaves exactly one corner marker',a
   return row.querySelectorAll('.folder-unseen').length===1&&!row.className.includes('activity-')&&
     rows[0].querySelector('.folder-unseen')===null&&document.querySelectorAll('.folder-unseen').length===1;
 }));
-ok('the settled corner is a decorative bottom-right triangle that costs the row no geometry',await lifecyclePage.evaluate(()=>{
+/* The triangle is clipped out of the marker's box, so its two legs are exactly the
+   box width and height: an isosceles right triangle only stays isosceles while those
+   rendered lengths match. Measure both, not just a non-zero size. */
+const settledCornerGeometry=await lifecyclePage.evaluate(()=>{
   const row=document.querySelectorAll('.folder')[1],marker=row.querySelector('.folder-unseen');
   const box=(element)=>{const r=element.getBoundingClientRect();return [r.x,r.y,r.width,r.height]};
   const same=(a,b)=>a.every((value,index)=>Math.abs(value-b[index])<.5);
   const r=row.getBoundingClientRect(),m=marker.getBoundingClientRect(),style=getComputedStyle(marker);
-  return marker.getAttribute('aria-hidden')==='true'&&style.pointerEvents==='none'&&style.animationName==='none'&&
-    style.clipPath.startsWith('polygon')&&Math.abs(m.right-r.right)<.5&&Math.abs(m.bottom-r.bottom)<.5&&
-    same(box(row),window.__activityBaseline.row)&&same(box(row.querySelector('.folder-badge')),window.__activityBaseline.badge);
-}));
+  return {hidden:marker.getAttribute('aria-hidden')==='true',pointerEvents:style.pointerEvents,
+    animation:style.animationName,clipped:style.clipPath.startsWith('polygon'),
+    width:m.width,height:m.height,rightGap:Math.abs(m.right-r.right),bottomGap:Math.abs(m.bottom-r.bottom),
+    rowUnmoved:same(box(row),window.__activityBaseline.row),
+    badgeUnmoved:same(box(row.querySelector('.folder-badge')),window.__activityBaseline.badge)};
+});
+ok('the settled corner is a decorative bottom-right triangle that costs the row no geometry',
+  settledCornerGeometry.hidden&&settledCornerGeometry.pointerEvents==='none'&&settledCornerGeometry.animation==='none'&&
+  settledCornerGeometry.clipped&&settledCornerGeometry.rightGap<.5&&settledCornerGeometry.bottomGap<.5&&
+  settledCornerGeometry.rowUnmoved&&settledCornerGeometry.badgeUnmoved,JSON.stringify(settledCornerGeometry));
+ok('the settled corner is an isosceles right triangle with equal 6px legs',
+  Math.abs(settledCornerGeometry.width-6)<.5&&Math.abs(settledCornerGeometry.height-6)<.5&&
+  Math.abs(settledCornerGeometry.width-settledCornerGeometry.height)<.5,JSON.stringify(settledCornerGeometry));
 ok('the settled corner is distinct from the completion dot and named for screen readers',await lifecyclePage.evaluate(()=>{
   const row=document.querySelectorAll('.folder')[1],label=row.querySelector('.folder-main').getAttribute('aria-label');
   return label.includes('unseen output')&&!label.includes('completed command')&&row.querySelector('.folder-complete')===null;

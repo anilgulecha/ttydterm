@@ -192,10 +192,11 @@
   }
   .folder.active .folder-complete { background:var(--ui-active-ink);box-shadow:0 0 0 2px var(--ui-active); }
 
-  /* Settled output corner: the gradient animation came to rest here. It sits in
-     the strip below the row menu button, so revealing that button hides nothing. */
+  /* Settled output corner: the gradient animation came to rest here. It is an
+     isosceles right triangle tucked into the corner, clear of the row menu
+     button, so revealing that button hides nothing. */
   .folder-unseen {
-    position:absolute;z-index:2;right:0;bottom:0;width:26px;height:6px;pointer-events:none;
+    position:absolute;z-index:2;right:0;bottom:0;width:6px;height:6px;pointer-events:none;
     clip-path:polygon(100% 0,100% 100%,0 100%);
     background:linear-gradient(100deg,var(--ui-success) 0%,var(--ui-accent) 100%);
   }

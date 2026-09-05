@@ -263,3 +263,8 @@ These rules apply to terminal workspaces and other single-file browser tools.
     the painted pixels stay apart. Bounding boxes may touch without collision,
     so measure the rendered shape against the opaque control rather than trusting
     the layout rectangle.
+
+77. When a shape is clipped out of a box, its proportions are the box dimensions.
+    Assert the rendered width and height a shape claim depends on, because a
+    non-zero size check passes for any proportion and silently permits the wrong
+    shape.

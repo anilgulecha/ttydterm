@@ -252,3 +252,14 @@ These rules apply to terminal workspaces and other single-file browser tools.
     normal teardown path, guard the old handlers so late close and error callbacks cannot
     describe the attempt that replaced them, and return focus through the component's
     public API once the replacement is ready.
+
+75. Classify ambient activity when it arrives, not when it settles. A decaying
+    signal outlives the condition that produced it, so deciding at the end of
+    decay reports the wrong state for anything the user attended to in between.
+    Latch the judgement at receipt, let the timer only publish that latch, and
+    clear the latch when attention arrives.
+
+76. A resting indicator and a hover-revealed control can share a corner only if
+    the painted pixels stay apart. Bounding boxes may touch without collision,
+    so measure the rendered shape against the opaque control rather than trusting
+    the layout rectangle.

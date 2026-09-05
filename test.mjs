@@ -106,10 +106,10 @@ ok('social previews use the published product screenshot', await page.evaluate((
     content('meta[name="twitter:image"]')==='https://www.gulecha.org/ttydterm/docs/ttydterm.png';
 }));
 ok('hash route settled on a folder', /#\/f\//.test(page.url()), page.url());
-ok('release 1.8.0 is a compact superscript beside the wordmark and exposed on the shell',await page.evaluate(()=>
-  document.querySelector('.brand-version')?.textContent==='1.8.0'&&
-  document.querySelector('.brand-version')?.getAttribute('aria-label')==='version 1.8.0'&&
-  document.querySelector('.shell')?.getAttribute('data-version')==='1.8.0'));
+ok('release 1.9.0 is a compact superscript beside the wordmark and exposed on the shell',await page.evaluate(()=>
+  document.querySelector('.brand-version')?.textContent==='1.9.0'&&
+  document.querySelector('.brand-version')?.getAttribute('aria-label')==='version 1.9.0'&&
+  document.querySelector('.shell')?.getAttribute('data-version')==='1.9.0'));
 const faviconBoot=await page.evaluate(()=>{
   const links=[...document.querySelectorAll('link[rel~="icon"]')],link=links[0],href=link?.getAttribute('href')||'';
   return {count:links.length,state:link?.dataset.state,href,svg:href.startsWith('data:image/svg+xml,')?decodeURIComponent(href.slice(href.indexOf(',')+1)):''};
@@ -173,12 +173,20 @@ ok('the collapse control shares the workspace icon column', await page.evaluate(
 ok('the release uses a light superscript pill immediately after ttydterm',await page.evaluate(()=>{
   const name=document.querySelector('.brand-name'),badge=document.querySelector('.brand-version');if(!badge||!name)return false;
   const b=badge.getBoundingClientRect(),n=name.getBoundingClientRect(),style=getComputedStyle(badge);
-  return badge.textContent==='1.8.0'&&b.left>=n.right&&b.top<n.top+n.height/2&&b.height<n.height&&parseFloat(style.borderRadius)>=6&&style.boxShadow!=='none';
+  return badge.textContent==='1.9.0'&&b.left>=n.right&&b.top<n.top+n.height/2&&b.height<n.height&&parseFloat(style.borderRadius)>=6&&style.boxShadow!=='none';
 }));
 ok('workspace icons have no decorative line markers',await page.evaluate(()=>
   [...document.querySelectorAll('.folder-badge')].every((badge)=>getComputedStyle(badge,'::after').content==='none')));
 ok('workspace icons use the larger 19px presentation',await page.evaluate(()=>{
   const icon=document.querySelector('.folder-badge svg');return !!icon&&icon.getBoundingClientRect().width===19&&icon.getBoundingClientRect().height===19;
+}));
+
+ok('the selected workspace is shown by its own styling, not a separate edge marker',await page.evaluate(()=>{
+  const row=document.querySelector('.folder.active'),rest=document.querySelector('.folder:not(.active)');
+  if(!row||!rest)return false;
+  const before=getComputedStyle(row,'::before'),style=getComputedStyle(row),other=getComputedStyle(rest);
+  return before.content==='none'&&row.querySelector('.folder-main')?.getAttribute('aria-current')==='true'&&
+    style.backgroundColor!==other.backgroundColor&&style.color!==other.color&&parseInt(style.fontWeight)>parseInt(other.fontWeight);
 }));
 
 ok('each workspace row uses one triple-dot menu control', await page.evaluate(() =>
@@ -1396,6 +1404,57 @@ ok('every theme colour that carries text clears AA (4.5:1)', textFails.length ==
 const uiFails = audit.filter((r) => r.kind === 'ui' && r.ratio < r.min);
 ok('every focus ring and favicon marker clears the 3:1 non-text minimum', uiFails.length === 0,
   uiFails.map((f) => `${f.theme}.${f.key}=${f.ratio}`).join(', '));
+/* The corner paints over three real backgrounds: an idle row, a hovered row, and
+   the inverted selected row. Every theme must audit all three, by name. */
+const UNSEEN_KEYS=['unseen-accent/panel','unseen-success/panel','unseen-accent/hover','unseen-success/hover','unseen-inverted/active'];
+const unseenAudit = audit.filter((r) => r.key.startsWith('unseen-'));
+const unseenThemes = [...new Set(unseenAudit.map((r) => r.theme))];
+const unseenMissing = unseenThemes.flatMap((theme) => {
+  const keys = unseenAudit.filter((r) => r.theme === theme).map((r) => r.key).sort();
+  return keys.join() === [...UNSEEN_KEYS].sort().join() ? [] : [theme + '=' + keys.join('|')];
+});
+ok('every theme audits the settled corner against idle, hover, and selected backgrounds',
+  unseenThemes.length === 9 && unseenMissing.length === 0 && unseenAudit.length === 45,
+  unseenMissing.join(', ') || 'count=' + unseenAudit.length);
+ok('the settled corner clears the 3:1 non-text minimum on every audited background',
+  unseenAudit.length > 0 && unseenAudit.every((r) => r.ratio >= 3),
+  unseenAudit.filter((r) => r.ratio < 3).map((f) => `${f.theme}.${f.key}=${f.ratio}`).join(', '));
+ok('an unselected row paints the settled corner as the semantic accent/success gradient',await page.evaluate(()=>{
+  const row=document.querySelector('.folder:not(.active)');if(!row)return false;
+  const layer=document.createElement('span');layer.className='folder-unseen';row.append(layer);
+  const style=getComputedStyle(layer),image=style.backgroundImage,box=layer.getBoundingClientRect();
+  const resolved=(name)=>getComputedStyle(row).getPropertyValue(name).trim();
+  const toRgb=(hex)=>{const h=hex.replace('#','');return 'rgb('+[0,2,4].map((i)=>parseInt(h.slice(i,i+2),16)).join(', ')+')'};
+  const result=image.includes('gradient')&&image.includes(toRgb(resolved('--ui-success')))&&image.includes(toRgb(resolved('--ui-accent')))&&box.width>0&&box.height>0;
+  layer.remove();return result;
+}));
+ok('the selected row paints the settled corner as solid inverted active ink',await page.evaluate(()=>{
+  const row=document.querySelector('.folder.active');if(!row)return false;
+  const layer=document.createElement('span');layer.className='folder-unseen';row.append(layer);
+  const style=getComputedStyle(layer),box=layer.getBoundingClientRect();
+  const probe=document.createElement('span');probe.style.color='var(--ui-active-ink)';row.append(probe);
+  const ink=getComputedStyle(probe).color;
+  const result=style.backgroundImage==='none'&&style.backgroundColor===ink&&box.width>0&&box.height>0;
+  layer.remove();probe.remove();return result;
+}));
+const unseenHover=await (async()=>{
+  const row=page.locator('.folder:not(.active)').first();
+  const idle=await row.evaluate((node)=>{
+    const layer=document.createElement('span');layer.className='folder-unseen';layer.dataset.probe='hover';node.append(layer);
+    return getComputedStyle(node).backgroundColor;
+  });
+  await row.hover();
+  const hovered=await row.evaluate((node)=>{
+    const layer=node.querySelector('[data-probe="hover"]'),style=getComputedStyle(layer),box=layer.getBoundingClientRect();
+    const out={rowBg:getComputedStyle(node).backgroundColor,image:style.backgroundImage,width:box.width,height:box.height};
+    layer.remove();return out;
+  });
+  await page.mouse.move(0,0);
+  return {idle,...hovered};
+})();
+ok('the settled corner stays a visible semantic gradient on a hovered row',
+  unseenHover.rowBg!==unseenHover.idle&&unseenHover.image.includes('gradient')&&unseenHover.width>0&&unseenHover.height>0,
+  JSON.stringify(unseenHover));
 const dimWorst = Math.min(...audit.filter((r) => r.key === 'dim').map((r) => r.ratio));
 ok('the dimmest text in any theme still clears AA', dimWorst >= 4.5, 'worst dim = ' + dimWorst);
 
@@ -1445,7 +1504,7 @@ const railLook = () => page.evaluate(() => {
     activeFg: g('.folder.active .folder-name', 'color'),
     activeBg: g('.folder.active', 'backgroundColor'),
     restFg:   g('.folder:not(.active) .folder-name', 'color'),
-    marker:   getComputedStyle(document.querySelector('.folder.active'), '::before').backgroundColor,
+    activeWeight: g('.folder.active', 'fontWeight'),
     icoFg:    g('.rail .ico', 'color'),
   };
 });
@@ -2030,6 +2089,128 @@ ok('a stale close from the replaced terminal never reports the new connection as
   await reconnectPage.evaluate(()=>window.__reconnectStates.join(', ')));
 await reconnectContext.close();
 
+const keyboardContext=await browser.newContext({viewport:{width:1200,height:760}});
+await keyboardContext.addInitScript((config)=>{
+  localStorage.setItem('ttyd-workspace-v2',JSON.stringify(config));window.__keySockets=[];
+  const frame=(command,text)=>{const data=new TextEncoder().encode(text),out=new Uint8Array(data.length+1);out[0]=command.charCodeAt(0);out.set(data,1);return out.buffer};
+  class FakeWebSocket{
+    constructor(){this.readyState=0;this.sent=[];this.closed=false;window.__keySockets.push(this);queueMicrotask(()=>{this.readyState=1;this.onopen?.({})})}
+    send(value){
+      const text=new TextDecoder().decode(value);this.sent.push(text);
+      if(text.startsWith('{'))queueMicrotask(()=>this.onmessage?.({data:frame('0','shell ready\r\n')}));
+      const marker=text.match(/__TTYDTERM_PROBE_[a-z0-9]+__/i)?.[0];
+      if(marker)queueMicrotask(()=>this.onmessage?.({data:frame('0','\0'+marker+'\0/home/test\0/work\0/bin/bash\0'+'0\0'+marker+'\0')}));
+    }
+    close(){this.closed=true;this.readyState=3}
+  }
+  Object.defineProperty(window,'WebSocket',{value:FakeWebSocket,configurable:true});
+},{version:8,ui:{railWidth:176,railOpen:true,fontSize:13,fontWeight:'regular',notifyOnCommandFinish:false,useTmux:false},folders:[
+  {id:'keys-one',name:'keys-one',cwd:'~',theme:'night',icon:null,pattern:'plain',layout:{type:'split',axis:'columns',sizes:[.34,.66],children:[
+    {type:'pane',id:'key-a',command:'echo key-a',persist:false},{type:'split',axis:'rows',sizes:[.5,.5],children:[
+      {type:'pane',id:'key-b',command:'echo key-b',persist:false},{type:'pane',id:'key-c',command:'echo key-c',persist:false},
+    ]},
+  ]}},
+  {id:'keys-two',name:'keys-two',cwd:'~',theme:'ocean',icon:null,pattern:'plain',layout:{type:'pane',id:'key-d',command:'echo key-d',persist:false}},
+  {id:'keys-three',name:'keys-three',cwd:'~',theme:'forest',icon:null,pattern:'plain',layout:{type:'pane',id:'key-e',command:'echo key-e',persist:false}},
+]});
+const keyboardPage=await keyboardContext.newPage();
+await keyboardPage.route('**/token',(route)=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({token:'test-token'})}));
+await keyboardPage.goto(RAW_BASE,{waitUntil:'domcontentloaded'});
+await keyboardPage.waitForFunction(()=>document.querySelectorAll('.connection-ready').length===5);
+const focusedPaneId=()=>keyboardPage.evaluate(()=>document.activeElement?.closest('.pane')?.dataset.paneId||null);
+const sentTo=(id)=>keyboardPage.evaluate((paneId)=>{
+  const socket=window.__keySockets.filter((candidate)=>candidate.sent.some((text)=>text.includes(paneId))).at(-1);
+  return socket?socket.sent.length:-1;
+},id);
+await keyboardPage.locator('[data-pane-id="key-a"]').click({position:{x:90,y:90}});
+await keyboardPage.waitForFunction(()=>document.activeElement?.classList.contains('xterm-helper-textarea'));
+/* Snapshot every terminal, so a horizontal key cannot quietly reach any of them. */
+const allSent=()=>keyboardPage.evaluate(()=>window.__keySockets.map((socket)=>socket.sent.length));
+const sentBeforeNavigation=await allSent();
+await keyboardPage.keyboard.press('Alt+ArrowRight');
+await keyboardPage.waitForFunction(()=>document.activeElement?.closest('.pane')?.dataset.paneId==='key-b');
+ok('Alt+Right moves to the next terminal and gives its xterm real input focus',await keyboardPage.evaluate(()=>
+  document.activeElement?.classList.contains('xterm-helper-textarea')&&document.activeElement?.closest('.pane')?.dataset.paneId==='key-b'&&
+  document.querySelector('[data-pane-id="key-b"]')?.classList.contains('focused')));
+await keyboardPage.keyboard.press('Alt+ArrowLeft');
+await keyboardPage.waitForFunction(()=>document.activeElement?.closest('.pane')?.dataset.paneId==='key-a');
+ok('Alt+Left moves back to the previous terminal and restores its xterm focus',await keyboardPage.evaluate(()=>
+  document.activeElement?.classList.contains('xterm-helper-textarea')&&document.activeElement?.closest('.pane')?.dataset.paneId==='key-a'));
+const sentAfterNavigation=await allSent();
+ok('Alt+Left/Right are application shortcuts and never reach any terminal as input',
+  sentBeforeNavigation.length>0&&sentBeforeNavigation.every((count)=>count>0)&&
+  sentAfterNavigation.join()===sentBeforeNavigation.join(),
+  JSON.stringify({before:sentBeforeNavigation,after:sentAfterNavigation}));
+/* Vertical keys belong to the terminal, so each press must produce its own
+   terminal-input frame: ttyd input frames are the ones prefixed with '0'. */
+const inputFrames=(paneId)=>keyboardPage.evaluate((id)=>{
+  const socket=window.__keySockets.filter((candidate)=>candidate.sent.some((text)=>text.includes(id))).at(-1);
+  return socket?socket.sent.filter((text)=>text.startsWith('0')).length:-1;
+},paneId);
+const workspaceBeforeVertical=await keyboardPage.evaluate(()=>document.querySelector('.folder.active .folder-name')?.textContent);
+const beforeUp=await inputFrames('key-a');
+await keyboardPage.keyboard.press('Alt+ArrowUp');
+await keyboardPage.waitForFunction(({id,count})=>{
+  const socket=window.__keySockets.filter((candidate)=>candidate.sent.some((text)=>text.includes(id))).at(-1);
+  return socket.sent.filter((text)=>text.startsWith('0')).length>count;
+},{id:'key-a',count:beforeUp},{timeout:2000}).catch(()=>{});
+const afterUp=await inputFrames('key-a');
+ok('Alt+Up reaches the focused terminal as its own input frame',afterUp===beforeUp+1,JSON.stringify({beforeUp,afterUp}));
+await keyboardPage.keyboard.press('Alt+ArrowDown');
+await keyboardPage.waitForFunction(({id,count})=>{
+  const socket=window.__keySockets.filter((candidate)=>candidate.sent.some((text)=>text.includes(id))).at(-1);
+  return socket.sent.filter((text)=>text.startsWith('0')).length>count;
+},{id:'key-a',count:afterUp},{timeout:2000}).catch(()=>{});
+const afterDown=await inputFrames('key-a');
+ok('Alt+Down reaches the focused terminal as its own input frame',afterDown===afterUp+1,JSON.stringify({afterUp,afterDown}));
+ok('Alt+Up/Down change neither the focused terminal nor the active workspace',
+  await focusedPaneId()==='key-a'&&await keyboardPage.evaluate(()=>document.querySelector('.folder.active .folder-name')?.textContent)===workspaceBeforeVertical);
+await keyboardPage.keyboard.press('Alt+3');
+await keyboardPage.waitForFunction(()=>document.querySelector('.folder.active .folder-name')?.textContent==='keys-three');
+ok('Alt+3 switches to the third workspace and restores its terminal',await keyboardPage.evaluate(()=>
+  document.activeElement?.closest('.pane')?.dataset.paneId==='key-e'&&/#\/f\/keys-three/.test(location.hash)));
+await keyboardPage.keyboard.press('Alt+2');
+await keyboardPage.waitForFunction(()=>document.querySelector('.folder.active .folder-name')?.textContent==='keys-two');
+ok('Alt+2 switches to the second workspace and restores its terminal',await keyboardPage.evaluate(()=>
+  document.activeElement?.closest('.pane')?.dataset.paneId==='key-d'&&/#\/f\/keys-two/.test(location.hash)));
+await keyboardPage.keyboard.press('Alt+1');
+await keyboardPage.waitForFunction(()=>document.querySelector('.folder.active .folder-name')?.textContent==='keys-one');
+ok('Alt+1 returns to the first workspace',await keyboardPage.evaluate(()=>/#\/f\/keys-one/.test(location.hash)));
+await keyboardPage.evaluate(()=>location.hash='#/shortcuts');
+await keyboardPage.waitForSelector('.shortcuts-dialog');
+ok('the shortcut reference documents only the horizontal pane keys',await keyboardPage.evaluate(()=>{
+  const text=document.querySelector('.shortcuts-dialog')?.textContent||'';
+  return text.includes('Alt + Left/Right')&&!text.includes('Alt + Arrow keys');
+}));
+await keyboardPage.keyboard.press('Escape');
+await keyboardPage.waitForSelector('.shortcuts-dialog',{state:'detached'});
+/* Removing a workspace must take its ephemeral attention with it, so the row that
+   inherits its position never shows output nobody produced. */
+await keyboardPage.evaluate(()=>{
+  const socket=window.__keySockets.filter((candidate)=>candidate.sent.some((value)=>value.includes('key-e'))).at(-1);
+  const data=new TextEncoder().encode('busy output '.repeat(500)),out=new Uint8Array(data.length+1);out[0]=48;out.set(data,1);socket.onmessage({data:out.buffer});
+});
+await keyboardPage.waitForFunction(()=>document.querySelectorAll('.folder')[2].querySelector('.folder-unseen')!==null,null,{timeout:6000});
+await keyboardPage.evaluate(()=>{
+  const row=[...document.querySelectorAll('.folder')].find((item)=>item.textContent.includes('keys-three'));
+  row.querySelector('.folder-act').click();
+});
+await keyboardPage.locator('.folder-menu [role="menuitem"]',{hasText:'Close'}).click();
+await keyboardPage.waitForFunction(()=>document.querySelectorAll('.folder').length===2);
+ok('removing a workspace discards its unseen state instead of leaving it on the rail',await keyboardPage.evaluate(()=>
+  document.querySelectorAll('.folder-unseen').length===0&&
+  [...document.querySelectorAll('.folder-main')].every((main)=>!main.getAttribute('aria-label').includes('unseen output'))));
+await keyboardPage.evaluate(()=>{
+  const config=JSON.parse(localStorage.getItem('ttyd-workspace-v2'));
+  config.folders.push({id:'keys-four',name:'keys-four',cwd:'~',theme:'amber',icon:null,pattern:'plain',layout:{type:'pane',id:'key-f',command:'echo key-f',persist:false}});
+  localStorage.setItem('ttyd-workspace-v2',JSON.stringify(config));
+});
+await keyboardPage.reload({waitUntil:'domcontentloaded'});
+await keyboardPage.waitForFunction(()=>document.querySelectorAll('.folder').length===3);
+ok('a later workspace never inherits the removed workspace unseen marker',await keyboardPage.evaluate(()=>
+  document.querySelectorAll('.folder-unseen').length===0));
+await keyboardContext.close();
+
 const realLifecycleConfig={version:7,ui:{railWidth:176,railOpen:true,fontSize:13,fontWeight:'regular',notifyOnCommandFinish:false},folders:[
   {id:'title-one',name:'title-one',cwd:'~',theme:'night',icon:null,pattern:'plain',layout:{type:'pane',id:'p-one',command:'bash',persist:false}},
   {id:'title-two',name:'title-two',cwd:'~',theme:'ocean',icon:null,pattern:'plain',layout:{type:'pane',id:'p-two',command:'bash',persist:false}},
@@ -2099,8 +2280,185 @@ ok('output in a hidden mounted workspace animates only its row and never persist
     same(box(row),window.__activityBaseline.row)&&same(box(badge),window.__activityBaseline.badge)&&row.querySelector('.folder-main').getAttribute('aria-label')===window.__activityBaseline.label;
 }));
 ok('activity updates do not reconnect terminal sockets',await lifecyclePage.evaluate((count)=>window.__fakeSockets.length===count,activitySocketCount));
-await lifecyclePage.waitForFunction(()=>!document.querySelectorAll('.folder')[1].className.includes('activity-'),null,{timeout:5000});
-ok('activity decoration decays back to idle',true);
+ok('a workspace still streaming output shows no settled corner yet',await lifecyclePage.evaluate(()=>
+  document.querySelectorAll('.folder')[1].querySelector('.folder-unseen')===null&&
+  !document.querySelectorAll('.folder')[1].querySelector('.folder-main').getAttribute('aria-label').includes('unseen output')));
+/* Unseen output: the gradient came to rest in a workspace nobody was watching. */
+const burst=(paneId)=>lifecyclePage.evaluate((id)=>{
+  const socket=window.__fakeSockets.filter((candidate)=>candidate.sent.some((value)=>value.includes(id))).at(-1);
+  const data=new TextEncoder().encode('busy output '.repeat(500)),out=new Uint8Array(data.length+1);out[0]=48;out.set(data,1);socket.onmessage({data:out.buffer});
+},paneId);
+const settledUnseen=()=>lifecyclePage.waitForFunction(()=>document.querySelectorAll('.folder')[1].querySelector('.folder-unseen')!==null,null,{timeout:6000});
+const readLifecycleConfig=()=>lifecyclePage.evaluate(()=>localStorage.getItem('ttyd-workspace-v2'));
+const configBeforeActivity=await readLifecycleConfig();
+/* The decay itself is the outcome: the live gradient hands the row to the settled
+   corner, and both cues are never on the row at the same moment. */
+await lifecyclePage.waitForFunction(()=>{
+  const row=document.querySelectorAll('.folder')[1];
+  return !row.className.includes('activity-')&&row.querySelector('.folder-unseen')!==null;
+},null,{timeout:6000});
+ok('the live activity gradient decays into the settled corner, never both at once',await lifecyclePage.evaluate(()=>{
+  const row=document.querySelectorAll('.folder')[1];
+  return !row.className.includes('activity-')&&row.querySelector('.folder-activity')===null&&row.querySelector('.folder-unseen')!==null;
+}));
+ok('settled output in an unwatched workspace leaves exactly one corner marker',await lifecyclePage.evaluate(()=>{
+  const rows=[...document.querySelectorAll('.folder')],row=rows[1];
+  return row.querySelectorAll('.folder-unseen').length===1&&!row.className.includes('activity-')&&
+    rows[0].querySelector('.folder-unseen')===null&&document.querySelectorAll('.folder-unseen').length===1;
+}));
+ok('the settled corner is a decorative bottom-right triangle that costs the row no geometry',await lifecyclePage.evaluate(()=>{
+  const row=document.querySelectorAll('.folder')[1],marker=row.querySelector('.folder-unseen');
+  const box=(element)=>{const r=element.getBoundingClientRect();return [r.x,r.y,r.width,r.height]};
+  const same=(a,b)=>a.every((value,index)=>Math.abs(value-b[index])<.5);
+  const r=row.getBoundingClientRect(),m=marker.getBoundingClientRect(),style=getComputedStyle(marker);
+  return marker.getAttribute('aria-hidden')==='true'&&style.pointerEvents==='none'&&style.animationName==='none'&&
+    style.clipPath.startsWith('polygon')&&Math.abs(m.right-r.right)<.5&&Math.abs(m.bottom-r.bottom)<.5&&
+    same(box(row),window.__activityBaseline.row)&&same(box(row.querySelector('.folder-badge')),window.__activityBaseline.badge);
+}));
+ok('the settled corner is distinct from the completion dot and named for screen readers',await lifecyclePage.evaluate(()=>{
+  const row=document.querySelectorAll('.folder')[1],label=row.querySelector('.folder-main').getAttribute('aria-label');
+  return label.includes('unseen output')&&!label.includes('completed command')&&row.querySelector('.folder-complete')===null;
+}));
+ok('unseen output leaves saved configuration byte-for-byte unchanged and the favicon calm',
+  await readLifecycleConfig()===configBeforeActivity&&
+  await lifecyclePage.evaluate(()=>document.querySelector('link[data-ttydterm-favicon]')?.dataset.state==='normal'));
+ok('settling unseen output opens no new terminal socket',await lifecyclePage.evaluate((count)=>window.__fakeSockets.length===count,activitySocketCount));
+await lifecyclePage.evaluate(()=>document.querySelector('.rail-toggle').click());
+await lifecyclePage.waitForFunction(()=>document.querySelector('.rail').className.includes('collapsed'));
+const unseenCollapsed=await lifecyclePage.evaluate(()=>{
+  const row=document.querySelectorAll('.folder')[1],marker=row.querySelector('.folder-unseen');
+  const r=row.getBoundingClientRect(),m=marker?.getBoundingClientRect();
+  return {collapsed:document.querySelector('.rail').className.includes('collapsed'),
+    visible:!!marker&&m.width>0&&m.height>0&&Math.abs(m.right-r.right)<.5};
+});
+ok('the settled corner survives a collapsed sidebar',unseenCollapsed.collapsed&&unseenCollapsed.visible,JSON.stringify(unseenCollapsed));
+await lifecyclePage.evaluate(()=>document.querySelector('.rail-toggle').click());
+await lifecyclePage.waitForFunction(()=>!document.querySelector('.rail').className.includes('collapsed'));
+await burst('p-two');
+await lifecyclePage.waitForFunction(()=>document.querySelectorAll('.folder')[1].className.includes('activity-'));
+ok('a fresh burst hands the row back to the live animation',await lifecyclePage.evaluate(()=>
+  document.querySelectorAll('.folder')[1].querySelector('.folder-unseen')===null));
+await settledUnseen();
+ok('a repeated burst settles back into a single corner, never a stack',await lifecyclePage.evaluate(()=>
+  document.querySelectorAll('.folder')[1].querySelectorAll('.folder-unseen').length===1));
+ok('repeated bursts still write nothing to saved configuration',await readLifecycleConfig()===configBeforeActivity);
+/* A second burst inside the first decay window is one continuing episode: the row
+   may not settle early, and the pair may not leave two marks behind. */
+await lifecyclePage.locator('.folder-main',{hasText:'title-two'}).click();
+await lifecyclePage.waitForFunction(()=>document.querySelectorAll('.folder')[1].querySelector('.folder-unseen')===null);
+await lifecyclePage.locator('.folder-main',{hasText:'title-one'}).click();
+await lifecyclePage.waitForFunction(()=>document.querySelector('.folder.active .folder-name')?.textContent==='title-one');
+await burst('p-two');
+await lifecyclePage.waitForFunction(()=>document.querySelectorAll('.folder')[1].className.includes('activity-'));
+await burst('p-two');
+const duringSecondBurst=await lifecyclePage.evaluate(()=>{
+  const row=document.querySelectorAll('.folder')[1];
+  return {live:row.className.includes('activity-'),markers:row.querySelectorAll('.folder-unseen').length};
+});
+ok('a second burst inside the decay window shows no early settled corner',
+  duringSecondBurst.live&&duringSecondBurst.markers===0,JSON.stringify(duringSecondBurst));
+await settledUnseen();
+ok('two bursts in one episode leave exactly one corner after the final decay',await lifecyclePage.evaluate(()=>
+  document.querySelectorAll('.folder')[1].querySelectorAll('.folder-unseen').length===1&&
+  document.querySelectorAll('.folder-unseen').length===1));
+const socketsBeforeAcknowledge=await lifecyclePage.evaluate(()=>window.__fakeSockets.length);
+await lifecyclePage.locator('.folder-main',{hasText:'title-two'}).click();
+await lifecyclePage.waitForFunction(()=>document.querySelectorAll('.folder')[1].querySelector('.folder-unseen')===null);
+ok('viewing the workspace acknowledges its unseen output without restarting terminals',await lifecyclePage.evaluate((count)=>{
+  const row=document.querySelectorAll('.folder')[1];
+  return window.__fakeSockets.length===count&&!row.querySelector('.folder-main').getAttribute('aria-label').includes('unseen output');
+},socketsBeforeAcknowledge));
+ok('acknowledging unseen output leaves saved configuration byte-for-byte unchanged',await readLifecycleConfig()===configBeforeActivity);
+/* A stream too quiet to animate is still a stream: it must stay pending across
+   ticks and only settle once the output has actually stopped. */
+await lifecyclePage.locator('.folder-main',{hasText:'title-one'}).click();
+await lifecyclePage.waitForFunction(()=>document.querySelector('.folder.active .folder-name')?.textContent==='title-one');
+await lifecyclePage.waitForFunction(()=>document.querySelectorAll('.folder')[1].querySelector('.folder-unseen')===null&&
+  !document.querySelectorAll('.folder')[1].className.includes('activity-'),null,{timeout:8000});
+const slowStream=await lifecyclePage.evaluate(()=>new Promise((resolve)=>{
+  const socket=window.__fakeSockets.filter((candidate)=>candidate.sent.some((value)=>value.includes('p-two'))).at(-1);
+  const data=new TextEncoder().encode('.'),frame=new Uint8Array(data.length+1);frame[0]=48;frame.set(data,1);
+  const samples=[];let sent=0;
+  const timer=setInterval(()=>{
+    socket.onmessage({data:frame.buffer.slice(0)});sent++;
+    samples.push(document.querySelectorAll('.folder-unseen').length);
+    if(sent>=14){clearInterval(timer);resolve({sent,samples,ticksSpanned:Math.floor(sent*120/250)})}
+  },120);
+}));
+ok('a sub-floor stream never shows a settled corner while output keeps arriving',
+  slowStream.ticksSpanned>=5&&slowStream.samples.every((count)=>count===0),JSON.stringify(slowStream));
+await settledUnseen();
+ok('a stopped sub-floor stream settles into exactly one corner on a quiet tick',await lifecyclePage.evaluate(()=>
+  document.querySelectorAll('.folder')[1].querySelectorAll('.folder-unseen').length===1&&
+  document.querySelectorAll('.folder-unseen').length===1));
+/* A settled corner claims the output stopped. A new stream makes that claim false,
+   so the stale corner must clear on the tick that receives bytes, even when the
+   stream stays too quiet to animate. Sampled across ticks, not per frame. */
+const staleCorner=await lifecyclePage.evaluate(()=>new Promise((resolve)=>{
+  const socket=window.__fakeSockets.filter((candidate)=>candidate.sent.some((value)=>value.includes('p-two'))).at(-1);
+  const data=new TextEncoder().encode('.'),frame=new Uint8Array(data.length+1);frame[0]=48;frame.set(data,1);
+  const row=()=>document.querySelectorAll('.folder')[1];
+  const before=row().querySelectorAll('.folder-unseen').length;
+  const samples=[];let sent=0;
+  const timer=setInterval(()=>{
+    socket.onmessage({data:frame.buffer.slice(0)});sent++;
+    samples.push({markers:document.querySelectorAll('.folder-unseen').length,live:row().className.includes('activity-')});
+    if(sent>=16){clearInterval(timer);resolve({before,samples,ticksSpanned:Math.floor(sent*120/250)})}
+  },120);
+}));
+const afterFirstTick=staleCorner.samples.slice(4);
+ok('a settled corner clears once a new sub-floor stream starts arriving',
+  staleCorner.before===1&&staleCorner.ticksSpanned>=5&&afterFirstTick.length>=10&&
+  afterFirstTick.every((sample)=>sample.markers===0&&!sample.live),JSON.stringify(staleCorner));
+await settledUnseen();
+ok('a sub-floor stream that cleared a stale corner settles back into exactly one',await lifecyclePage.evaluate(()=>
+  document.querySelectorAll('.folder')[1].querySelectorAll('.folder-unseen').length===1&&
+  document.querySelectorAll('.folder-unseen').length===1));
+await lifecyclePage.locator('.folder-main',{hasText:'title-two'}).click();
+await lifecyclePage.waitForFunction(()=>document.querySelectorAll('.folder')[1].querySelector('.folder-unseen')===null);
+await burst('p-two');
+await lifecyclePage.waitForFunction(()=>document.querySelectorAll('.folder')[1].className.includes('activity-'));
+await lifecyclePage.waitForFunction(()=>!document.querySelectorAll('.folder')[1].className.includes('activity-'),null,{timeout:6000});
+ok('output produced while its workspace is being watched never becomes unseen',await lifecyclePage.evaluate(()=>
+  document.querySelectorAll('.folder')[1].querySelector('.folder-unseen')===null));
+/* Viewing mid-decay must acknowledge the burst, so nothing may surface later. */
+await lifecyclePage.locator('.folder-main',{hasText:'title-one'}).click();
+await lifecyclePage.waitForFunction(()=>document.querySelector('.folder.active .folder-name')?.textContent==='title-one');
+await burst('p-two');
+await lifecyclePage.waitForFunction(()=>document.querySelectorAll('.folder')[1].className.includes('activity-'));
+await lifecyclePage.locator('.folder-main',{hasText:'title-two'}).click();
+await lifecyclePage.waitForFunction(()=>document.querySelector('.folder.active .folder-name')?.textContent==='title-two');
+await lifecyclePage.locator('.folder-main',{hasText:'title-one'}).click();
+await lifecyclePage.waitForFunction(()=>document.querySelector('.folder.active .folder-name')?.textContent==='title-one');
+await lifecyclePage.waitForFunction(()=>!document.querySelectorAll('.folder')[1].className.includes('activity-'),null,{timeout:8000});
+ok('viewing a workspace during its decay leaves no stale corner behind',await lifecyclePage.evaluate(()=>
+  document.querySelectorAll('.folder')[1].querySelector('.folder-unseen')===null));
+/* Completion attention stays its own signal: different mark, different clearing. */
+await burst('p-two');
+await settledUnseen();
+await lifecyclePage.evaluate(()=>window.__reportCommandCompletion({folderId:'title-two',paneId:'p-two',exitStatus:0,duration:6000}));
+await lifecyclePage.waitForFunction(()=>document.querySelectorAll('.folder')[1].querySelector('.folder-complete')!==null);
+ok('unseen output and command completion coexist as separate marks on one row',await lifecyclePage.evaluate(()=>{
+  const row=document.querySelectorAll('.folder')[1],unseen=row.querySelector('.folder-unseen'),complete=row.querySelector('.folder-complete');
+  const u=unseen.getBoundingClientRect(),c=complete.getBoundingClientRect();
+  const label=row.querySelector('.folder-main').getAttribute('aria-label');
+  return getComputedStyle(complete).borderRadius.startsWith('50%')&&getComputedStyle(unseen).clipPath.startsWith('polygon')&&
+    (u.right>c.right&&u.bottom>c.bottom)&&label.includes('unseen output')&&label.includes('completed command');
+}));
+ok('output activity neither creates nor clears command-completion attention',await lifecyclePage.evaluate(()=>{
+  const row=document.querySelectorAll('.folder')[1];
+  return row.querySelector('.folder-complete')!==null&&
+    document.querySelector('link[data-ttydterm-favicon]')?.dataset.state==='attention'&&
+    !localStorage.getItem('ttyd-workspace-v2').includes('unseen');
+}));
+const completionBeforeBurst=await lifecyclePage.evaluate(()=>document.querySelectorAll('.folder-complete').length);
+await burst('p-two');
+await settledUnseen();
+ok('a later burst re-raises unseen output without disturbing the completion count',await lifecyclePage.evaluate((count)=>
+  document.querySelectorAll('.folder-complete').length===count&&
+  document.querySelectorAll('.folder')[1].querySelector('.folder-unseen')!==null,completionBeforeBurst));
+await lifecyclePage.locator('.folder-main',{hasText:'title-one'}).click();
+await lifecyclePage.waitForFunction(()=>document.querySelector('.folder.active .folder-name')?.textContent==='title-one');
 const primarySocket=await lifecyclePage.evaluate(()=>{
   const socket=window.__fakeSockets.filter((candidate)=>candidate.sent.some((value)=>value.includes('p-one'))).at(-1);return {sent:socket.sent.length};
 });
@@ -2238,6 +2596,16 @@ const rmAnim = await rmPage.locator('.surface:not([hidden]) .pane').first()
 ok('reduced motion disables pane entrance animation', rmAnim === 'none', rmAnim);
 const reducedActivity=await rmPage.locator('.folder').first().evaluate((row)=>{const layer=document.createElement('span');layer.className='folder-activity';row.append(layer);const name=getComputedStyle(layer).animationName;layer.remove();return name});
 ok('reduced motion keeps workspace activity static',reducedActivity==='none',reducedActivity);
+const reducedUnseen=await rmPage.locator('.folder').first().evaluate((row)=>{
+  const layer=document.createElement('span');layer.className='folder-unseen';row.append(layer);
+  const style=getComputedStyle(layer),box=layer.getBoundingClientRect();
+  const result={animation:style.animationName,transition:style.transitionDuration,width:box.width,height:box.height,image:style.backgroundImage};
+  layer.remove();return result;
+});
+/* Real marker creation under reduced motion is covered by the activity state machine;
+   here the corner only has to arrive already at rest, with nothing left to animate. */
+ok('reduced motion shows the settled corner with no animation and nothing in transition',
+  reducedUnseen.animation==='none'&&reducedUnseen.transition==='0s'&&reducedUnseen.width>0&&reducedUnseen.height>0,JSON.stringify(reducedUnseen));
 const reducedExchange=rmPage.locator('.surface:not([hidden]) .pane-grip button').first();await reducedExchange.focus();await reducedExchange.press('Enter');await reducedExchange.press('ArrowRight');
 ok('reduced motion keeps pane exchange cues static',await rmPage.evaluate(()=>[...document.querySelectorAll('.pane-exchange-cue')].every((cue)=>getComputedStyle(cue).animationName==='none')));
 await reducedExchange.press('Escape');await rmPage.close();

@@ -20,6 +20,11 @@ const rgb = (hex: string) => { const h=hex.replace('#',''); return [0,2,4].map((
 const linear = (value: number) => { const c=value/255; return c<=0.03928 ? c/12.92 : Math.pow((c+0.055)/1.055,2.4); };
 const luminance = (hex: string) => { const [r,g,b]=rgb(hex).map(linear); return 0.2126*r+0.7152*g+0.0722*b; };
 const contrast = (a: string, b: string) => { const x=luminance(a),y=luminance(b); return (Math.max(x,y)+0.05)/(Math.min(x,y)+0.05); };
+/* Mirrors the srgb color-mix the chrome uses, so audited pairs match painted ones. */
+const mix = (a: string, b: string, amount: number) => {
+  const [x,y]=[rgb(a),rgb(b)];
+  return '#'+x.map((value,index)=>Math.round(value*amount+y[index]*(1-amount)).toString(16).padStart(2,'0')).join('');
+};
 
 export const contrastAudit = () => {
   const text: Array<keyof Theme & ('fg'|'dim'|'red'|'green'|'yellow'|'blue'|'magenta'|'cyan'|'cursor')> = ['fg','dim','red','green','yellow','blue','magenta','cyan','cursor'];
@@ -28,6 +33,14 @@ export const contrastAudit = () => {
     text.forEach((key)=>out.push({theme:name,key,kind:'text',ratio:+contrast(t[key],t.bg).toFixed(2),min:4.5}));
     out.push({theme:name,key:'focus-ring',kind:'ui',ratio:+contrast(t.blue,t.bg).toFixed(2),min:3});
     out.push({theme:name,key:'favicon-attention',kind:'ui',ratio:+contrast(t.ui.warning,t.bg).toFixed(2),min:3});
+    /* The settled corner paints over the rail row: --ui-panel is the theme background,
+       hover mixes foreground into it, and an active row inverts onto --ui-active. */
+    const rowHover=mix(t.fg,t.bg,0.14);
+    out.push({theme:name,key:'unseen-accent/panel',kind:'ui',ratio:+contrast(t.ui.focus,t.bg).toFixed(2),min:3});
+    out.push({theme:name,key:'unseen-success/panel',kind:'ui',ratio:+contrast(t.ui.success,t.bg).toFixed(2),min:3});
+    out.push({theme:name,key:'unseen-accent/hover',kind:'ui',ratio:+contrast(t.ui.focus,rowHover).toFixed(2),min:3});
+    out.push({theme:name,key:'unseen-success/hover',kind:'ui',ratio:+contrast(t.ui.success,rowHover).toFixed(2),min:3});
+    out.push({theme:name,key:'unseen-inverted/active',kind:'ui',ratio:+contrast(t.bg,t.blue).toFixed(2),min:3});
     out.push({theme:name,key:'terminal-selection',kind:'text',ratio:+contrast(t.bg,t.blue).toFixed(2),min:4.5});
     out.push({theme:name,key:'ui-text/sidebar',kind:'text',ratio:+contrast(t.ui.text,t.ui.sidebar).toFixed(2),min:4.5});
     out.push({theme:name,key:'ui-muted/sidebar',kind:'text',ratio:+contrast(t.ui.muted,t.ui.sidebar).toFixed(2),min:4.5});

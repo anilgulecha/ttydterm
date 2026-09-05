@@ -1560,18 +1560,21 @@ function CommandPalette({ folders, activeId, onPick, onClose, inputRef }: {
 const folderLabel = (f: Folder) => f.name || f.cwd.split('/').filter((s: string) => s && s !== '~').pop() || 'workspace';
 
 function ShortcutsDialog({onClose}:{onClose:()=>void}) {
-  const groups=[['Workspaces',[['Alt + 1…9','Switch workspace and restore its last terminal'],['Ctrl/⌘ + Shift + ,','Workspace settings']]],['Panes',[['Alt + Arrow keys','Move between terminals'],['Enter · ↑↓ · Enter','Exchange terminals from the focused handle'],['Arrow keys','Navigate an open pane menu'],['Enter','Activate the selected item']]],['Application',[['Ctrl/⌘ + K or P','Find a workspace or terminal'],['Ctrl/⌘ + B','Toggle sidebar'],['Ctrl/⌘ + ,','Global settings'],['Escape','Close a menu or dialog']]]] as const;
+  const groups=[['Workspaces',[['Alt + 1…9','Switch workspace and restore its last terminal'],['Ctrl/⌘ + Shift + ,','Workspace settings']]],['Panes',[['Alt + Left/Right','Move between terminals'],['Enter · ↑↓ · Enter','Exchange terminals from the focused handle'],['Arrow keys','Navigate an open pane menu'],['Enter','Activate the selected item']]],['Application',[['Ctrl/⌘ + K or P','Find a workspace or terminal'],['Ctrl/⌘ + B','Toggle sidebar'],['Ctrl/⌘ + ,','Global settings'],['Escape','Close a menu or dialog']]]] as const;
   return <ModalForm variant="shortcuts-dialog" title="Keyboard shortcuts" onClose={onClose}>{groups.map(([title,items])=><section key={title} className="shortcut-group"><h3>{title}</h3>{items.map(([keys,label])=><div key={keys} className="shortcut-row"><kbd>{keys}</kbd><span>{label}</span></div>)}</section>)}</ModalForm>;
 }
 
 type FolderMenuState={source:'trigger'|'context';x:number;y:number};
-function FolderRow({folder,compact,index,count,active,activity,canRemove,completedByPane,dragging,dragOffset,reordering,onDragStart,onFocus,onRemove,onMove}:{
-  folder:Folder;compact:boolean;index:number;count:number;active:boolean;activity:number;canRemove:boolean;
+function FolderRow({folder,compact,index,count,active,activity,unseen,canRemove,completedByPane,dragging,dragOffset,reordering,onDragStart,onFocus,onRemove,onMove}:{
+  folder:Folder;compact:boolean;index:number;count:number;active:boolean;activity:number;unseen:boolean;canRemove:boolean;
   completedByPane:Record<string,number>;dragging:boolean;dragOffset:number;reordering:boolean;
   onDragStart:(folderId:string,event:React.PointerEvent<HTMLElement>)=>void;
   onFocus:(folder:Folder)=>void;onRemove:(id:string)=>void;onMove:(id:string,targetIndex:number)=>void;
 }){
   const label=folderLabel(folder),completed=listPanes(folder.layout).reduce((sum,pane)=>sum+(completedByPane[pane.id]||0),0);
+  /* Live output owns the row while it flows. The settled corner only reports
+     output that already stopped, so the two cues never claim the row together. */
+  const showUnseen=unseen&&!activity;
   const [menu,setMenu]=useState<FolderMenuState|null>(null);
   const trigger=useRef<HTMLButtonElement|null>(null),main=useRef<HTMLButtonElement|null>(null),menuRef=useRef<HTMLSpanElement|null>(null);
   useEffect(()=>{if(!menu)return;const close=()=>setMenu(null);addEventListener('pointerdown',close);return()=>removeEventListener('pointerdown',close)},[menu]);
@@ -1594,9 +1597,10 @@ function FolderRow({folder,compact,index,count,active,activity,canRemove,complet
               style={reordering?{transform:'translateY('+dragOffset+'px)'}:undefined}
               onContextMenu={(event:React.MouseEvent<HTMLDivElement>)=>{event.preventDefault();event.stopPropagation();setMenu({source:'context',x:event.clientX,y:event.clientY})}}>
     {activity?<span className="folder-activity" aria-hidden="true"/>:null}
+    {showUnseen?<span className="folder-unseen" aria-hidden="true"/>:null}
     <button ref={main} type="button" className="folder-main" aria-current={active?'true':undefined}
             aria-keyshortcuts={index<9?'Alt+'+(index+1):undefined}
-            aria-label={(compact?label:'Workspace '+label)+', position '+(index+1)+' of '+count+(completed?', '+completed+' completed command'+(completed===1?'':'s'):'')+(index<9?', Alt+'+(index+1):'')}
+            aria-label={(compact?label:'Workspace '+label)+', position '+(index+1)+' of '+count+(completed?', '+completed+' completed command'+(completed===1?'':'s'):'')+(showUnseen?', unseen output':'')+(index<9?', Alt+'+(index+1):'')}
             onClick={()=>onFocus(folder)} onDoubleClick={()=>go('f',folder.id,'settings')}>
       <span className="folder-badge" title={'Drag to reorder '+label}
             onPointerDown={(event:React.PointerEvent<HTMLSpanElement>)=>onDragStart(folder.id,event)}>
@@ -1638,6 +1642,11 @@ function App() {
   const [activityByFolder,setActivityByFolder]=useState<Record<string,number>>({});
   const activityEnergy=useRef<Record<string,number>>({});
   const activityBytes=useRef<Record<string,number>>({});
+  /* Unseen output: a workspace animated while it was not the viewed one, then
+     went quiet. It is ephemeral attention, separate from command completion. */
+  const [unseenByFolder,setUnseenByFolder]=useState<Record<string,boolean>>({});
+  const unseenPending=useRef<Record<string,boolean>>({});
+  const activeIdRef=useRef('');
   const [notificationState,setNotificationState]=useState<NotificationPermissionState>(notificationPermission);
   const paletteInputRef=useRef<HTMLInputElement|null>(null);
   const route = useRoute();
@@ -1675,15 +1684,43 @@ function App() {
   useEffect(() => { detectRuntime().then(setRuntime); }, []);
   useEffect(()=>{if(runtime.mode==='ttyd'&&capabilities.state==='unknown')checkCapabilities()},[runtime,capabilities.state,checkCapabilities]);
   useEffect(() => { if(configured) localStorage.setItem(STORE_KEY, JSON.stringify(config)); }, [config, configured]);
-  const onOutputActivity=useCallback((folderId:string,bytes:number)=>{activityBytes.current[folderId]=(activityBytes.current[folderId]||0)+bytes},[]);
+  /* Classify at receipt, not at settle: only bytes that arrived while the viewer
+     was elsewhere can become unseen. Refs only, so a busy pane writes no state. */
+  const onOutputActivity=useCallback((folderId:string,bytes:number)=>{
+    activityBytes.current[folderId]=(activityBytes.current[folderId]||0)+bytes;
+    if(folderId!==activeIdRef.current)unseenPending.current[folderId]=true;
+  },[]);
   useEffect(()=>{
     const timer=setInterval(()=>{
-      const ids=new Set([...Object.keys(activityEnergy.current),...Object.keys(activityBytes.current)]),levels:Record<string,number>={};
+      /* Pending ids join the scan even with no energy left, so a stream that never
+         reaches the visual floor still gets a tick that can settle it. */
+      const ids=new Set([...Object.keys(activityEnergy.current),...Object.keys(activityBytes.current),...Object.keys(unseenPending.current)]),levels:Record<string,number>={},settled:string[]=[],arriving:string[]=[];
       for(const id of ids){
-        const next=Math.min(ACTIVITY_REFERENCE,(activityEnergy.current[id]||0)*ACTIVITY_DECAY+(activityBytes.current[id]||0));delete activityBytes.current[id];
-        if(next>=ACTIVITY_FLOOR){activityEnergy.current[id]=next;levels[id]=activityLevel(next)}else delete activityEnergy.current[id];
+        const arrived=activityBytes.current[id]||0;
+        /* Output is flowing again, so any corner from the previous episode is now
+           stale. It is cleared here even when the stream is too quiet to animate. */
+        if(arrived>0)arriving.push(id);
+        const next=Math.min(ACTIVITY_REFERENCE,(activityEnergy.current[id]||0)*ACTIVITY_DECAY+arrived);delete activityBytes.current[id];
+        /* The tick only publishes what receipt already armed. Decaying energy from
+           output the viewer has since watched can never re-arm the corner. */
+        if(next>=ACTIVITY_FLOOR){activityEnergy.current[id]=next;levels[id]=activityLevel(next)}
+        else{
+          delete activityEnergy.current[id];
+          /* Sub-floor bytes are still output in flight: too quiet to animate, too
+             recent to call settled. Only a tick that received nothing may settle. */
+          if(arrived>0)continue;
+          if(unseenPending.current[id]){delete unseenPending.current[id];if(id!==activeIdRef.current)settled.push(id)}
+        }
       }
       setActivityByFolder((current)=>{const keys=new Set([...Object.keys(current),...Object.keys(levels)]);return [...keys].every((key)=>current[key]===levels[key])?current:levels});
+      /* One batched write per tick covers both directions: ids that received bytes
+         drop their settled corner, ids that went quiet raise theirs. Receipt itself
+         still writes no state, and pending stays armed so quiet re-settles later. */
+      if(settled.length||arriving.length)setUnseenByFolder((current)=>{
+        const raise=settled.filter((id)=>!current[id]),clear=arriving.filter((id)=>current[id]);
+        if(!raise.length&&!clear.length)return current;
+        const next={...current};for(const id of clear)delete next[id];for(const id of raise)next[id]=true;return next;
+      });
     },ACTIVITY_TICK_MS);
     return()=>clearInterval(timer);
   },[]);
@@ -1693,7 +1730,9 @@ function App() {
     const live=new Set(folders.map((folder)=>folder.id));
     for(const id of Object.keys(activityEnergy.current))if(!live.has(id))delete activityEnergy.current[id];
     for(const id of Object.keys(activityBytes.current))if(!live.has(id))delete activityBytes.current[id];
+    for(const id of Object.keys(unseenPending.current))if(!live.has(id))delete unseenPending.current[id];
     setActivityByFolder((current)=>{const next=Object.fromEntries(Object.entries(current).filter(([id])=>live.has(id)));return Object.keys(next).length===Object.keys(current).length?current:next});
+    setUnseenByFolder((current)=>{const next=Object.fromEntries(Object.entries(current).filter(([id])=>live.has(id)));return Object.keys(next).length===Object.keys(current).length?current:next});
   },[folders]);
   const routedId = route[0] === 'f' ? route[1] : null;
 
@@ -1708,8 +1747,14 @@ function App() {
   if(!active) throw new Error('Configuration has no folders');
   const activeTheme = THEMES[active.theme] || THEMES.paper;
   const hasAttention=useMemo(()=>folders.some((folder)=>listPanes(folder.layout).some((item)=>(completedByPane[item.id]||0)>0)),[folders,completedByPane]);
-  const configRef=useRef(config),activeIdRef=useRef(active.id);
+  const configRef=useRef(config);
   configRef.current=config;activeIdRef.current=active.id;
+  /* Viewing a workspace acknowledges its output, including output still decaying,
+     so a settled corner can never appear for something already watched. */
+  useEffect(()=>{
+    delete unseenPending.current[active.id];
+    setUnseenByFolder((current)=>{if(!current[active.id])return current;const next={...current};delete next[active.id];return next});
+  },[active.id]);
   useEffect(() => { document.documentElement.style.colorScheme = activeTheme.appearance; }, [activeTheme.appearance]);
   useEffect(()=>updateFavicon(activeTheme,hasAttention?'attention':'normal'),[activeTheme,hasAttention]);
   useEffect(() => {
@@ -1774,7 +1819,9 @@ function App() {
       const mod = e.metaKey || e.ctrlKey;
       const k = e.key.toLowerCase();
       if (e.altKey && /^[1-9]$/.test(e.key)) { const folder=folders[Number(e.key)-1];if(folder){e.preventDefault();e.stopPropagation();focusFolderPane(folder)}return; }
-      if(e.altKey && ['arrowleft','arrowup','arrowright','arrowdown'].includes(k)) { const at=Math.max(0,paneIds.indexOf(focusId||''));const delta=k==='arrowleft'||k==='arrowup'?-1:1;const id=paneIds[(at+delta+paneIds.length)%paneIds.length];if(id){e.preventDefault();e.stopPropagation();setFocusId(id);setFocusReq({id,nonce:Date.now()})}return; }
+      /* Only the horizontal pair moves between panes. Alt+Up/Down stay with the
+         terminal so xterm and tmux keep their own vertical bindings. */
+      if(e.altKey && (k==='arrowleft'||k==='arrowright')) { const at=Math.max(0,paneIds.indexOf(focusId||''));const delta=k==='arrowleft'?-1:1;const id=paneIds[(at+delta+paneIds.length)%paneIds.length];if(id){e.preventDefault();e.stopPropagation();setFocusId(id);setFocusReq({id,nonce:Date.now()})}return; }
       if (!mod) return;
       if (k === 'b') { e.preventDefault();e.stopPropagation();setRailOpen((v) => !v); }
       else if (k === 'k' || k === 'p') { e.preventDefault();e.stopPropagation();go('palette'); }
@@ -2048,7 +2095,7 @@ function App() {
         <div className={'rail-list'+(dragOrder?' reordering':'')} ref={railListRef}>
           {folders.map((folder,index)=>{const previewIndex=dragOrder?.indexOf(folder.id)??index,offset=draggingFolder?.id===folder.id
             ?draggingFolder.offset:(previewIndex-index)*(draggingFolder?.stride||0);return <FolderRow key={folder.id} folder={folder} index={index} count={folders.length} compact={!railOpen}
-            active={folder.id===active.id} activity={activityByFolder[folder.id]||0} canRemove={folders.length>1} completedByPane={completedByPane}
+            active={folder.id===active.id} activity={activityByFolder[folder.id]||0} unseen={!!unseenByFolder[folder.id]} canRemove={folders.length>1} completedByPane={completedByPane}
             dragging={draggingFolder?.id===folder.id} dragOffset={offset}
             reordering={!!dragOrder} onDragStart={startFolderDrag}
             onFocus={focusFolderFromRow} onRemove={removeFolder} onMove={moveFolderWithAnnouncement}/>})}

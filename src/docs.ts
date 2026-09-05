@@ -89,7 +89,7 @@ const readmeKeyboard: DocSection = {
     { kind: 'heading', text: 'Keyboard' },
     { kind: 'defs', items: [
       { term:'Alt + 1…9', detail:'switch workspace and restore its last pane' },
-      { term:'Alt + Arrow', detail:'move focus between panes' },
+      { term:'Alt + Left/Right', detail:'move focus between panes' },
       { term:'Ctrl/⌘ + K or P', detail:'find a workspace or terminal' },
       { term:'Ctrl/⌘ + B', detail:'toggle the sidebar' },
       { term:'Ctrl/⌘ + ,', detail:'open global settings' },
